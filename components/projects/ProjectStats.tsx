@@ -7,34 +7,58 @@ import {
   Archive,
 } from "lucide-react";
 
-const stats = [
-  {
-    title: "Total Projects",
-    value: "12",
-    icon: FolderKanban,
-    color: "text-cyan-400",
-  },
-  {
-    title: "Running",
-    value: "5",
-    icon: PlayCircle,
-    color: "text-green-400",
-  },
-  {
-    title: "Completed",
-    value: "6",
-    icon: CheckCircle2,
-    color: "text-emerald-400",
-  },
-  {
-    title: "Archived",
-    value: "1",
-    icon: Archive,
-    color: "text-slate-400",
-  },
-];
+import { type Project } from "@/data/projects";
 
-export default function ProjectStats() {
+interface ProjectStatsProps {
+  projects: Project[];
+}
+
+export default function ProjectStats({
+  projects,
+}: ProjectStatsProps) {
+  const totalProjects = projects.filter(
+    (p) => !p.archived
+  ).length;
+
+  const runningProjects = projects.filter(
+    (p) => p.status === "Running" && !p.archived
+  ).length;
+
+  const completedProjects = projects.filter(
+    (p) => p.status === "Completed" && !p.archived
+  ).length;
+
+  const archivedProjects = projects.filter(
+    (p) => p.archived
+  ).length;
+
+  const stats = [
+    {
+      title: "Total Projects",
+      value: totalProjects,
+      icon: FolderKanban,
+      color: "text-cyan-400",
+    },
+    {
+      title: "Running",
+      value: runningProjects,
+      icon: PlayCircle,
+      color: "text-green-400",
+    },
+    {
+      title: "Completed",
+      value: completedProjects,
+      icon: CheckCircle2,
+      color: "text-emerald-400",
+    },
+    {
+      title: "Archived",
+      value: archivedProjects,
+      icon: Archive,
+      color: "text-slate-400",
+    },
+  ];
+
   return (
     <div className="mb-8 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
       {stats.map((item) => {
@@ -55,7 +79,6 @@ export default function ProjectStats() {
             "
           >
             <div className="flex items-center justify-between">
-
               <div>
                 <p className="text-sm text-slate-400">
                   {item.title}
@@ -66,10 +89,11 @@ export default function ProjectStats() {
                 </h2>
               </div>
 
-              <div className={`rounded-xl bg-[#1B2433] p-3 ${item.color}`}>
+              <div
+                className={`rounded-xl bg-[#1B2433] p-3 ${item.color}`}
+              >
                 <Icon size={24} />
               </div>
-
             </div>
           </div>
         );

@@ -8,17 +8,31 @@ interface Project {
   description: string;
   status: "Running" | "Building" | "Testing" | "Completed";
   progress: number;
+
   members: number;
   agents: number;
+
+  github: string;
+  deployment: string;
+  
 }
 
 interface ProjectGridProps {
   projects: Project[];
+  onDelete: (id: string) => void;
+  onDuplicate: (id: string) => void;
+  onEdit: (project: Project) => void;
+  onArchive: (id: string) => void;
 }
 
 export default function ProjectGrid({
   projects,
+  onDelete,
+  onEdit,
+  onDuplicate,
+  onArchive,
 }: ProjectGridProps) {
+
   return (
     <section className="mt-8">
       <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
@@ -33,6 +47,12 @@ export default function ProjectGrid({
             updated="Recently"
             members={project.members}
             agents={project.agents}
+            github={project.github}
+            deployment={project.deployment}
+            onDelete={onDelete}
+            onEdit={() => onEdit(project)}
+            onDuplicate={onDuplicate}
+            onArchive={onArchive}
           />
         ))}
       </div>

@@ -4,8 +4,18 @@ import { notFound } from "next/navigation";
 
 import Sidebar from "@/components/dashboard/Sidebar";
 import TopNavbar from "@/components/dashboard/TopNavbar";
+
 import ProjectHeader from "@/components/project-details/ProjectHeader";
 import OverviewCards from "@/components/project-details/OverviewCards";
+import ActivityFeed from "@/components/project-details/ActivityFeed";
+import AgentStatus from "@/components/project-details/AgentStatus";
+import RecentFiles from "@/components/project-details/RecentFiles";
+import GitActivity from "@/components/project-details/GitActivity";
+import DeploymentStatus from "@/components/project-details/DeploymentStatus";
+import RepositoryStats from "@/components/project-details/RepositoryStats";
+import ProjectAnalytics from "@/components/project-details/ProjectAnalytics";
+import TeamMembers from "@/components/project-details/TeamMembers";
+
 
 import { projects } from "@/data/projects";
 
@@ -55,26 +65,56 @@ export default async function ProjectDetailsPage({
 
           </div>
 
+          {/* Header */}
+
           <ProjectHeader
-  name={project.name}
-  description={project.description}
-  status={project.status}
-  progress={project.progress}
-  techStack={project.techStack}
-  github={project.github}
+            name={project.name}
+            description={project.description}
+            status={project.status}
+            progress={project.progress}
+            techStack={project.techStack}
+            github={project.github}
+            deployment={project.deployment}
+          />
+
+          {/* Overview Cards */}
+
+          <OverviewCards
+            agents={project.agents}
+            activeAgents={project.agentsActive}
+            members={project.members}
+            onlineMembers={project.membersOnline}
+            files={project.files}
+            tasks={project.tasks}
+            pendingTasks={project.pendingTasks}
+          />
+
+         {/* Activity + Agent Status */}
+
+<div className="mt-8 grid gap-8 xl:grid-cols-2">
+  <ActivityFeed />
+  <AgentStatus />
+</div>
+
+{/* Recent Files + Git Activity */}
+
+<div className="mt-8 grid gap-8 xl:grid-cols-2">
+  <RecentFiles />
+  <GitActivity />
+</div>
+
+{/* Deployment Status */}
+
+<DeploymentStatus
   deployment={project.deployment}
 />
 
-          <OverviewCards
-  agents={project.agents}
-  activeAgents={project.agentsActive}
-  members={project.members}
-  onlineMembers={project.membersOnline}
-  files={project.files}
-  tasks={project.tasks}
-  pendingTasks={project.pendingTasks}
-/>
+<ProjectAnalytics />
 
+<RepositoryStats
+  github={project.github}
+/>
+<TeamMembers />
         </main>
       </div>
     </div>

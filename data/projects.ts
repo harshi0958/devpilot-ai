@@ -1,4 +1,27 @@
-export const projects = [
+export type Project = {
+  id: string;
+  name: string;
+  description: string;
+  status: "Running" | "Building" | "Testing" | "Completed";
+  progress: number;
+
+  members: number;
+  agents: number;
+
+  github: string;
+  deployment: string;
+
+  techStack: string[];
+  agentsActive: number;
+  membersOnline: number;
+  files: number;
+  tasks: number;
+  pendingTasks: number;
+  archived?: boolean;
+};
+
+
+export const projects: Project[] = [
   {
     id: "devpilot-ai",
     name: "DevPilot AI",
@@ -15,6 +38,7 @@ membersOnline: 6,
 files: 214,
 tasks: 48,
 pendingTasks: 7,
+archived: false,
   },
 
   {
@@ -38,6 +62,7 @@ membersOnline: 4,
 files: 96,
 tasks: 27,
 pendingTasks: 4,
+archived: false,
   },
 
   {
@@ -56,6 +81,7 @@ membersOnline: 5,
 files: 181,
 tasks: 100,
 pendingTasks: 0,
+archived: false,
   },
 
   {
@@ -74,6 +100,7 @@ membersOnline: 3,
 files: 142,
 tasks: 56,
 pendingTasks: 8,
+archived: false,
   },
 
   {
@@ -92,6 +119,7 @@ membersOnline: 7,
 files: 301,
 tasks: 73,
 pendingTasks: 11,
+archived: false,
   },
 
   {
@@ -110,5 +138,6 @@ membersOnline: 5,
 files: 87,
 tasks: 39,
 pendingTasks: 13,
+archived: false,
   },
-] as const;
+];

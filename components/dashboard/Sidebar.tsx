@@ -9,6 +9,8 @@ import {
   History,
   User,
   Settings,
+  Archive,
+  Star,
 } from "lucide-react";
 
 const menuItems = [
@@ -38,6 +40,11 @@ const menuItems = [
     icon: History,
   },
   {
+    title: "Archived Projects",
+    href: "/projects/archived",
+    icon: Archive,
+  },
+  {
     title: "Profile",
     href: "/profile",
     icon: User,
@@ -47,6 +54,11 @@ const menuItems = [
     href: "/settings",
     icon: Settings,
   },
+  {
+  title: "Favorite Projects",
+  href: "/projects/favorites",
+  icon: Star,
+},
 ];
 
 export default function Sidebar() {

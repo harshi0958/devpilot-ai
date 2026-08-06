@@ -1,16 +1,24 @@
 "use client";
 
 import { X } from "lucide-react";
+import { useState } from "react";
+
+import { type Project } from "@/data/projects";
 
 interface CreateProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onCreate: (project: Project) => void;
 }
 
 export default function CreateProjectModal({
   isOpen,
   onClose,
+  onCreate,
 }: CreateProjectModalProps) {
+  const [name, setName] = useState("");
+const [description, setDescription] = useState("");
+const [tech, setTech] = useState("Next.js");
   if (!isOpen) return null;
 
   return (
@@ -77,6 +85,8 @@ export default function CreateProjectModal({
 
             <input
               type="text"
+              value={name}
+               onChange={(e) => setName(e.target.value)}
               placeholder="Enter project name"
               className="
                 w-full
@@ -102,6 +112,8 @@ export default function CreateProjectModal({
 
             <textarea
               rows={4}
+              value={description}
+  onChange={(e) => setDescription(e.target.value)}
               placeholder="Describe your project..."
               className="
                 w-full
@@ -126,6 +138,8 @@ export default function CreateProjectModal({
             </label>
 
             <select
+            value={tech}
+  onChange={(e) => setTech(e.target.value)}
               className="
                 w-full
                 rounded-xl
@@ -196,19 +210,61 @@ export default function CreateProjectModal({
           </button>
 
           <button
-            className="
-              rounded-xl
-              bg-cyan-500
-              px-5
-              py-3
-              font-semibold
-              text-black
-              transition
-              hover:bg-cyan-400
-            "
-          >
-            Create Project
-          </button>
+  onClick={() => {
+    if (!name.trim()) return;
+
+    onCreate({
+  id: name.toLowerCase().replace(/\s+/g, "-"),
+
+  name,
+
+  description,
+
+  status: "Building",
+
+  progress: 0,
+
+  members: 1,
+
+  agents: 1,
+
+  github: "",
+
+  deployment: "",
+
+  techStack: [tech],
+
+  agentsActive: 1,
+
+  membersOnline: 1,
+
+  files: 0,
+
+  tasks: 0,
+
+  pendingTasks: 0,
+  archived: false,
+});
+
+    setName("");
+    setDescription("");
+    setTech("Next.js");
+
+    onClose();
+  }}
+  className="
+    rounded-xl
+    bg-cyan-500
+    px-5
+    py-3
+    font-semibold
+    text-black
+    transition
+    hover:bg-cyan-400
+  "
+>
+  Create Project
+</button>
 
         </div>
 
