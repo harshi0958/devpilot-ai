@@ -79,7 +79,9 @@ The project follows a modular architecture consisting of:
         │ → Debugging → Testing           │
         │ → Documentation → Deployment    │
         └─────────────────────────────────┘
+
 🧩 AI Agent Workflow
+
 User Requirement
        │
        ▼
@@ -102,29 +104,37 @@ Documentation Agent
        │
        ▼
 Final Software Project
+
+
 🛠️ Technology Stack
+
 Frontend
 Next.js
 React
 TypeScript
 Tailwind CSS
 Modern responsive UI
+
 Backend
 Node.js
 TypeScript
 API-based architecture
+
 Database
 Prisma ORM
 Relational database architecture
+
 AI
 Specialized AI agents
 AI-assisted software engineering workflows
 Agent-based task execution
+
 Development Tools
 Git
 GitHub
 VS Code
 npm
+
 📁 Project Structure
 devpilot-ai/
 │
@@ -160,6 +170,8 @@ devpilot-ai/
 ├── .gitignore
 ├── LICENSE
 └── README.md
+
+
 🚀 Getting Started
 Prerequisites
 
@@ -169,6 +181,7 @@ Node.js
 npm
 Git
 A supported relational database
+
 💻 Frontend Setup
 
 Navigate to the frontend directory:
@@ -186,6 +199,7 @@ npm run dev
 The frontend will be available at:
 
 http://localhost:3000
+
 ⚙️ Backend Setup
 
 Open another terminal and navigate to the backend:
@@ -204,16 +218,22 @@ Run the backend according to the project configuration.
 
 📸 Screenshots
 Dashboard
+<img width="1890" height="1028" alt="dashboard" src="https://github.com/user-attachments/assets/519362c9-827a-4a29-89a6-c8b5db6bdc1e" />
 
 AI Agents
+<img width="1884" height="1037" alt="AI-Agents" src="https://github.com/user-attachments/assets/d9bcb817-d7f5-4280-95c3-1b489ece4cce" />
 
 Architect Agent
+<img width="1919" height="1030" alt="agent-workspace" src="https://github.com/user-attachments/assets/51486ac8-4e19-490a-89b7-e9aac4bfdebf" />
 
 Projects
+<img width="1902" height="970" alt="projects" src="https://github.com/user-attachments/assets/7fbd0f3e-6fd9-43c3-b117-c93f7c3572e4" />
 
 Login
+<img width="1919" height="1038" alt="login" src="https://github.com/user-attachments/assets/3e83d9a5-8ad2-457c-ba8c-e3a88986f3d6" />
 
 Registration
+<img width="1919" height="1033" alt="register" src="https://github.com/user-attachments/assets/39fd6016-e414-482b-9ff7-7e705f51a7d4" />
 
 Screenshots will be added to the repository as the project documentation is finalized.
 
@@ -233,6 +253,7 @@ Project Vision & Scope
 Project Implementation Plan
 Sprint Documentation
 Brand Identity & Design System
+
 🔐 Security & Configuration
 
 Environment-specific secrets and credentials should never be committed to GitHub.
@@ -244,6 +265,7 @@ API keys
 AI service credentials
 Authentication secrets
 Deployment configuration
+
 🚧 Project Status
 
 Current Status: Active Development
@@ -265,6 +287,7 @@ Advanced project analytics
 Team collaboration
 Agent memory and context management
 Automated testing pipelines
+
 👨‍💻 Author
 
 Harshit Jariwala
