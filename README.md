@@ -217,23 +217,38 @@ DATABASE_URL=your_database_connection_string
 Run the backend according to the project configuration.
 
 📸 Screenshots
-Dashboard
-<img width="1890" height="1028" alt="dashboard" src="https://github.com/user-attachments/assets/519362c9-827a-4a29-89a6-c8b5db6bdc1e" />
+```
+## 📸 Screenshots
 
-AI Agents
-<img width="1884" height="1037" alt="AI-Agents" src="https://github.com/user-attachments/assets/d9bcb817-d7f5-4280-95c3-1b489ece4cce" />
+### Dashboard
 
-Architect Agent
-<img width="1919" height="1030" alt="agent-workspace" src="https://github.com/user-attachments/assets/51486ac8-4e19-490a-89b7-e9aac4bfdebf" />
+<img width="1890" height="1028" alt="dashboard" src="<img width="1890" height="1028" alt="dashboard" src="https://github.com/user-attachments/assets/9e1c8950-12c5-4a9d-b73a-c4e1ef41d98f" />
+" />
 
-Projects
-<img width="1902" height="970" alt="projects" src="https://github.com/user-attachments/assets/7fbd0f3e-6fd9-43c3-b117-c93f7c3572e4" />
+### AI Agents
 
-Login
-<img width="1919" height="1038" alt="login" src="https://github.com/user-attachments/assets/3e83d9a5-8ad2-457c-ba8c-e3a88986f3d6" />
+<img width="1884" height="1037" alt="AI-Agents" src="<img width="1884" height="1037" alt="AI-Agents" src="https://github.com/user-attachments/assets/7a1faac2-87d1-42c7-8bcc-cd9f3d3dee4f" />
+" />
 
-Registration
-<img width="1919" height="1033" alt="register" src="https://github.com/user-attachments/assets/39fd6016-e414-482b-9ff7-7e705f51a7d4" />
+### Architect Agent
+
+<img width="1919" height="1030" alt="agent-workspace" src="<img width="1919" height="1030" alt="agent-workspace" src="https://github.com/user-attachments/assets/125a1f79-2ee1-4ad0-8f04-5a1a2c162ac0" />
+" />
+
+### Projects
+
+<img width="1902" height="970" alt="projects" src="<img width="1902" height="970" alt="projects" src="https://github.com/user-attachments/assets/489bd089-c387-438a-8664-d4d893f9b4c7" />
+" />
+
+### Login
+
+<img width="1919" height="1038" alt="login" src="<img width="1919" height="1038" alt="login" src="https://github.com/user-attachments/assets/03808584-9869-4242-9585-4126ad3f6978" />
+" />
+
+### Registration
+
+<img width="1919" height="1033" alt="register" src="<img width="1919" height="1033" alt="register" src="https://github.com/user-attachments/assets/eab19bf6-e50c-43a7-9394-c862037cd136" />
+" />
 
 Screenshots will be added to the repository as the project documentation is finalized.
 
