@@ -1,0 +1,68 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 512 512"
+  width="512"
+  height="512"
+  fill="none">
+
+  <defs>
+
+    <!-- Background -->
+
+    <linearGradient
+      id="bg"
+      x1="0"
+      y1="0"
+      x2="512"
+      y2="512">
+
+      <stop offset="0%" stop-color="#09090B"/>
+      <stop offset="100%" stop-color="#020202"/>
+
+    </linearGradient>
+
+    <!-- Metallic -->
+
+    <linearGradient
+      id="metal"
+      x1="0"
+      y1="0"
+      x2="512"
+      y2="512">
+
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="18%" stop-color="#F2F2F2"/>
+      <stop offset="35%" stop-color="#D9D9D9"/>
+      <stop offset="55%" stop-color="#A7A7A7"/>
+      <stop offset="72%" stop-color="#E7E7E7"/>
+      <stop offset="100%" stop-color="#7E7E7E"/>
+
+    </linearGradient>
+
+    <!-- Arrow -->
+
+    <linearGradient
+      id="arrow"
+      x1="170"
+      y1="170"
+      x2="350"
+      y2="350">
+
+      <stop offset="0%" stop-color="#7C3AED"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+
+    </linearGradient>
+
+  </defs>
+
+  <!-- Background -->
+
+  <rect
+    x="16"
+    y="16"
+    width="480"
+    height="480"
+    rx="96"
+    fill="url(#bg)"
+    stroke="#2A2A2A"
+    stroke-width="2"/>
