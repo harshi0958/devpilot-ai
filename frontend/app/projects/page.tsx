@@ -7,6 +7,7 @@ import TopNavbar from "@/components/dashboard/TopNavbar";
 
 import { projects, type Project } from "@/data/projects";
 import { toast } from "sonner";
+
 import ProjectsHeader from "@/components/projects/ProjectsHeader";
 import ProjectsToolbar from "@/components/projects/ProjectsToolbar";
 import ProjectStats from "@/components/projects/ProjectStats";
@@ -18,6 +19,7 @@ export default function ProjectsPage() {
   const [openModal, setOpenModal] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
+
   const [selectedProject, setSelectedProject] =
     useState<Project | null>(null);
 
@@ -26,146 +28,384 @@ export default function ProjectsPage() {
   const [sort, setSort] = useState("default");
 
   const [projectList, setProjectList] =
-    useState<Project[]>(projects);
+    useState<Project[]>([]);
 
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load from LocalStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("projects");
+  const [loadingError, setLoadingError] = useState("");
 
-    if (saved) {
-      setProjectList(JSON.parse(saved));
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | Convert Backend Project → Frontend Project
+  |--------------------------------------------------------------------------
+  */
 
-    setIsLoaded(true);
-  }, []);
+  const mapBackendProject = (backendProject: any): Project => {
+    return {
+      id: backendProject.id,
 
-  // Save to LocalStorage
-  useEffect(() => {
-    if (!isLoaded) return;
+      name: backendProject.name,
 
-    localStorage.setItem(
-      "projects",
-      JSON.stringify(projectList)
-    );
-  }, [projectList, isLoaded]);
+      description:
+        backendProject.description || "",
 
-  // Delete
-  const deleteProject = (id: string) => {
-  const deletedProject = projectList.find(
-    (p) => p.id === id
-  );
+      status: "Building",
 
-  if (!deletedProject) return;
+      progress: 0,
 
-  setProjectList((prev) =>
-    prev.filter((project) => project.id !== id)
-  );
+      members:
+        backendProject._count?.members ?? 1,
 
-  toast.error("Project deleted", {
-    description: deletedProject.name,
-    action: {
-      label: "Undo",
-      onClick: () => {
-        setProjectList((prev) => [
-          deletedProject,
-          ...prev,
-        ]);
+      agents: 1,
 
-        toast.success("Project restored");
-      },
-    },
-  });
-};
-  // Archive
-  const archiveProject = (id: string) => {
-  setProjectList((prev) =>
-    prev.map((project) =>
-      project.id === id
-        ? {
-            ...project,
-            archived: true,
-          }
-        : project
-    )
-  );
+      github: "",
 
-  toast("📦 Project archived", {
-    description: "Project moved to Archived Projects",
-    action: {
-      label: "Undo",
-      onClick: () => {
-        setProjectList((prev) =>
-          prev.map((project) =>
-            project.id === id
-              ? {
-                  ...project,
-                  archived: false,
-                }
-              : project
-          )
-        );
+      deployment: "",
 
-        toast.success("Project restored");
-      },
-    },
-  });
-};
+      techStack: ["Next.js"],
 
-  // Duplicate
-  const duplicateProject = (id: string) => {
-  const project = projectList.find(
-    (p) => p.id === id
-  );
+      agentsActive: 1,
 
-  if (!project) return;
+      membersOnline: 1,
 
-  const copy: Project = {
-    ...project,
-    id: `${project.id}-${Date.now()}`,
-    name: `${project.name} Copy`,
-    archived: false,
+      files:
+        backendProject._count?.files ?? 0,
+
+      tasks: 0,
+
+      pendingTasks: 0,
+
+      archived: false,
+    };
   };
 
-  setProjectList((prev) => [copy, ...prev]);
+  /*
+  |--------------------------------------------------------------------------
+  | Load Projects From PostgreSQL
+  |--------------------------------------------------------------------------
+  */
 
-  toast.success("Project duplicated", {
-    description: copy.name,
-  });
-};
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        setLoadingError("");
 
-  // Edit
-  const updateProject = (updatedProject: Project) => {
-  setProjectList((prev) =>
-    prev.map((project) =>
-      project.id === updatedProject.id
-        ? {
-            ...project,
-            ...updatedProject,
+        const response = await fetch(
+          "http://localhost:5000/api/projects",
+          {
+            method: "GET",
+            credentials: "include",
           }
-        : project
-    )
-  );
+        );
 
-  toast.success("Project updated", {
-    description: updatedProject.name,
-  });
-};
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to fetch projects."
+          );
+        }
+
+        const backendProjects = Array.isArray(data.projects)
+          ? data.projects
+          : [];
+
+        const mappedProjects =
+          backendProjects.map(mapBackendProject);
+
+        setProjectList(mappedProjects);
+      } catch (error) {
+        console.error(
+          "Load Projects Error:",
+          error
+        );
+
+        setLoadingError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load projects."
+        );
+
+        /*
+        |--------------------------------------------------------------------------
+        | Fallback
+        |--------------------------------------------------------------------------
+        |
+        | We don't use localStorage anymore.
+        | If API fails, show empty list instead of fake data.
+        |
+        */
+
+        setProjectList([]);
+      } finally {
+        setIsLoaded(true);
+      }
+    };
+
+    loadProjects();
+  }, []);
+
+  /*
+  |--------------------------------------------------------------------------
+  | Delete
+  |--------------------------------------------------------------------------
+  */
+
+  const deleteProject = async (id: string) => {
+    const deletedProject = projectList.find(
+      (p) => p.id === id
+    );
+
+    if (!deletedProject) return;
+
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/projects/${id}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to delete project."
+        );
+      }
+
+      setProjectList((prev) =>
+        prev.filter(
+          (project) => project.id !== id
+        )
+      );
+
+      toast.success("Project deleted", {
+        description: deletedProject.name,
+      });
+    } catch (error) {
+      console.error(
+        "Delete Project Error:",
+        error
+      );
+
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to delete project."
+      );
+    }
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Archive
+  |--------------------------------------------------------------------------
+  */
+
+  const archiveProject = (id: string) => {
+    setProjectList((prev) =>
+      prev.map((project) =>
+        project.id === id
+          ? {
+              ...project,
+              archived: true,
+            }
+          : project
+      )
+    );
+
+    toast("📦 Project archived", {
+      description:
+        "Project moved to Archived Projects",
+      action: {
+        label: "Undo",
+        onClick: () => {
+          setProjectList((prev) =>
+            prev.map((project) =>
+              project.id === id
+                ? {
+                    ...project,
+                    archived: false,
+                  }
+                : project
+            )
+          );
+
+          toast.success("Project restored");
+        },
+      },
+    });
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Duplicate
+  |--------------------------------------------------------------------------
+  */
+
+  const duplicateProject = async (id: string) => {
+    const project = projectList.find(
+      (p) => p.id === id
+    );
+
+    if (!project) return;
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/projects",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            name: `${project.name} Copy`,
+            description: project.description,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to duplicate project."
+        );
+      }
+
+      const copy = mapBackendProject(
+        data.project
+      );
+
+      setProjectList((prev) => [
+        copy,
+        ...prev,
+      ]);
+
+      toast.success("Project duplicated", {
+        description: copy.name,
+      });
+    } catch (error) {
+      console.error(
+        "Duplicate Project Error:",
+        error
+      );
+
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to duplicate project."
+      );
+    }
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Edit
+  |--------------------------------------------------------------------------
+  */
+
+  const updateProject = async (
+    updatedProject: Project
+  ) => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/projects/${updatedProject.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            name: updatedProject.name,
+            description:
+              updatedProject.description,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to update project."
+        );
+      }
+
+      const updatedBackendProject =
+        mapBackendProject(data.project);
+
+      setProjectList((prev) =>
+        prev.map((project) =>
+          project.id === updatedProject.id
+            ? {
+                ...project,
+                ...updatedBackendProject,
+              }
+            : project
+        )
+      );
+
+      setEditOpen(false);
+
+      toast.success("Project updated", {
+        description:
+          updatedBackendProject.name,
+      });
+    } catch (error) {
+      console.error(
+        "Update Project Error:",
+        error
+      );
+
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to update project."
+      );
+    }
+  };
+
+  /*
+  |--------------------------------------------------------------------------
+  | Loading State
+  |--------------------------------------------------------------------------
+  */
 
   if (!isLoaded) {
     return (
       <div className="flex h-screen items-center justify-center bg-[#070B14] text-white">
-        Loading...
+        <div className="text-center">
+          <div className="text-lg font-semibold">
+            Loading projects...
+          </div>
+
+          <div className="mt-2 text-sm text-slate-400">
+            Connecting to DevPilot backend
+          </div>
+        </div>
       </div>
     );
   }
 
+  /*
+  |--------------------------------------------------------------------------
+  | Filter + Sort
+  |--------------------------------------------------------------------------
+  */
+
   const filteredProjects = projectList
     .filter((project) => {
-      const matchesSearch = project.name
-        .toLowerCase()
-        .includes(search.toLowerCase());
+      const matchesSearch =
+        project.name
+          .toLowerCase()
+          .includes(
+            search.toLowerCase()
+          );
 
       const matchesFilter =
         filter === "All" ||
@@ -180,27 +420,45 @@ export default function ProjectsPage() {
     .sort((a, b) => {
       switch (sort) {
         case "az":
-          return a.name.localeCompare(b.name);
+          return a.name.localeCompare(
+            b.name
+          );
 
         case "za":
-          return b.name.localeCompare(a.name);
+          return b.name.localeCompare(
+            a.name
+          );
 
         case "progress-high":
-          return b.progress - a.progress;
+          return (
+            b.progress - a.progress
+          );
 
         case "progress-low":
-          return a.progress - b.progress;
+          return (
+            a.progress - b.progress
+          );
 
         case "members-high":
-          return b.members - a.members;
+          return (
+            b.members - a.members
+          );
 
         case "members-low":
-          return a.members - b.members;
+          return (
+            a.members - b.members
+          );
 
         default:
           return 0;
       }
     });
+
+  /*
+  |--------------------------------------------------------------------------
+  | Page
+  |--------------------------------------------------------------------------
+  */
 
   return (
     <div className="flex min-h-screen bg-[#070B14]">
@@ -210,6 +468,7 @@ export default function ProjectsPage() {
         <TopNavbar />
 
         <main className="p-8">
+
           <ProjectsHeader
             onNewProject={() =>
               setOpenModal(true)
@@ -225,8 +484,29 @@ export default function ProjectsPage() {
             setSort={setSort}
           />
 
+          {/* API Error */}
+          {loadingError && (
+            <div
+              className="
+                mb-6
+                rounded-xl
+                border
+                border-red-500/20
+                bg-red-500/10
+                px-4
+                py-3
+                text-sm
+                text-red-400
+              "
+            >
+              {loadingError}
+            </div>
+          )}
+
           {/* Live Stats */}
-          <ProjectStats projects={projectList} />
+          <ProjectStats
+            projects={projectList}
+          />
 
           {/* Grid */}
           <ProjectGrid
@@ -235,11 +515,16 @@ export default function ProjectsPage() {
             onArchive={archiveProject}
             onDuplicate={duplicateProject}
             onEdit={(project) => {
-              const fullProject = projectList.find(
-                (p) => p.id === project.id
-              ) ?? null;
+              const fullProject =
+                projectList.find(
+                  (p) =>
+                    p.id === project.id
+                ) ?? null;
 
-              setSelectedProject(fullProject);
+              setSelectedProject(
+                fullProject
+              );
+
               setEditOpen(true);
             }}
           />
@@ -251,11 +536,17 @@ export default function ProjectsPage() {
               setOpenModal(false)
             }
             onCreate={(newProject) => {
-  setProjectList((prev) => [newProject, ...prev]);
-  setOpenModal(false);
+              setProjectList((prev) => [
+                newProject,
+                ...prev,
+              ]);
 
-  toast.success("Project created successfully 🚀");
-}}
+              setOpenModal(false);
+
+              toast.success(
+                "Project created successfully 🚀"
+              );
+            }}
           />
 
           {/* Edit */}
@@ -267,6 +558,7 @@ export default function ProjectsPage() {
             }
             onSave={updateProject}
           />
+
         </main>
       </div>
     </div>

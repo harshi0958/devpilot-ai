@@ -16,6 +16,12 @@ enum UserRole {
   ADMIN
 }
 
+enum UserPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
 enum ProjectRole {
   OWNER
   ADMIN
@@ -69,25 +75,36 @@ enum NotificationType {
 // ============================================================
 
 model User {
-  id              String   @id @default(uuid())
-  name            String
-  email           String   @unique
-  passwordHash    String
-  role            UserRole @default(USER)
-  avatarUrl       String?
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(USER)
+  avatarUrl    String?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  // ==========================================================
+  // SUBSCRIPTION / PLAN
+  // ==========================================================
 
-  projects        Project[]       @relation("ProjectOwner")
-  memberships     ProjectMember[]
-  conversations   Conversation[]
-  messages        Message[]
-  executions      AIExecution[]
-  notifications   Notification[]
+  plan                   UserPlan  @default(FREE)
+  razorpayCustomerId     String?
+  razorpaySubscriptionId String?
+  planStartedAt          DateTime?
+  planExpiresAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects      Project[]       @relation("ProjectOwner")
+  memberships   ProjectMember[]
+  conversations Conversation[]
+  messages      Message[]
+  executions    AIExecution[]
+  notifications Notification[]
 
   @@index([email])
   @@index([createdAt])
+  @@index([plan])
 }
 
 // ============================================================
@@ -95,24 +112,26 @@ model User {
 // ============================================================
 
 model Project {
-  id              String   @id @default(uuid())
-  name            String
-  description     String?
-  slug            String   @unique
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  slug        String  @unique
+  ownerId     String
+  owner       User    @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
 
-  ownerId         String
-  owner           User     @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  archived Boolean @default(false)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  members         ProjectMember[]
-  conversations   Conversation[]
-  files           ProjectFile[]
-  executions      AIExecution[]
+  members       ProjectMember[]
+  conversations Conversation[]
+  files         ProjectFile[]
+  executions    AIExecution[]
 
   @@index([ownerId])
   @@index([createdAt])
+  @@index([archived])
 }
 
 // ============================================================
@@ -120,17 +139,17 @@ model Project {
 // ============================================================
 
 model ProjectMember {
-  id              String      @id @default(uuid())
+  id String @id @default(uuid())
 
-  projectId       String
-  userId          String
-  role            ProjectRole @default(MEMBER)
+  projectId String
+  userId    String
+  role      ProjectRole @default(MEMBER)
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  project         Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user            User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, userId])
   @@index([projectId])
@@ -142,18 +161,18 @@ model ProjectMember {
 // ============================================================
 
 model Agent {
-  id              String    @id @default(uuid())
-  type            AgentType
-  name            String
-  description     String?
-  systemPrompt    String?
-  isActive        Boolean   @default(true)
+  id           String    @id @default(uuid())
+  type         AgentType
+  name         String
+  description  String?
+  systemPrompt String?
+  isActive     Boolean   @default(true)
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  conversations   Conversation[]
-  executions      AIExecution[]
+  conversations Conversation[]
+  executions    AIExecution[]
 
   @@unique([type])
   @@index([isActive])
@@ -164,24 +183,24 @@ model Agent {
 // ============================================================
 
 model Conversation {
-  id              String             @id @default(uuid())
+  id String @id @default(uuid())
 
-  title           String
-  status          ConversationStatus @default(ACTIVE)
+  title  String
+  status ConversationStatus @default(ACTIVE)
 
-  userId          String
-  projectId       String?
-  agentId         String?
+  userId    String
+  projectId String?
+  agentId   String?
 
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project         Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  agent           Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  agent   Agent?   @relation(fields: [agentId], references: [id], onDelete: SetNull)
 
-  messages        Message[]
-  executions      AIExecution[]
+  messages   Message[]
+  executions AIExecution[]
 
   @@index([userId])
   @@index([projectId])
@@ -195,19 +214,19 @@ model Conversation {
 // ============================================================
 
 model Message {
-  id              String        @id @default(uuid())
+  id String @id @default(uuid())
 
-  role            MessageRole
-  content         String
+  role    MessageRole
+  content String
 
-  userId          String?
-  conversationId  String
+  userId         String?
+  conversationId String
 
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user            User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  conversation    Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
   @@index([userId])
@@ -218,36 +237,36 @@ model Message {
 // ============================================================
 
 model AIExecution {
-  id              String          @id @default(uuid())
+  id String @id @default(uuid())
 
-  status          ExecutionStatus @default(QUEUED)
+  status ExecutionStatus @default(QUEUED)
 
-  userId          String
-  projectId       String?
-  conversationId  String?
-  agentId         String
+  userId         String
+  projectId      String?
+  conversationId String?
+  agentId        String
 
-  model           String
-  prompt          String
-  response        String?
+  model    String
+  prompt   String
+  response String?
 
-  inputTokens     Int?
-  outputTokens    Int?
-  totalTokens     Int?
-  durationMs      Int?
+  inputTokens  Int?
+  outputTokens Int?
+  totalTokens  Int?
+  durationMs   Int?
 
-  errorMessage    String?
+  errorMessage String?
 
-  startedAt       DateTime?
-  completedAt     DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
 
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project         Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  conversation    Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  agent           Agent           @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agent        Agent         @relation(fields: [agentId], references: [id], onDelete: Restrict)
 
   @@index([userId])
   @@index([projectId])
@@ -262,24 +281,24 @@ model AIExecution {
 // ============================================================
 
 model ProjectFile {
-  id              String    @id @default(uuid())
+  id String @id @default(uuid())
 
-  projectId       String
+  projectId String
 
-  name            String
-  path            String
-  type            FileType
+  name String
+  path String
+  type FileType
 
-  mimeType        String?
-  size            BigInt?
-  content         String?
+  mimeType String?
+  size     BigInt?
+  content  String?
 
-  parentPath      String?
+  parentPath String?
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, path])
   @@index([projectId])
@@ -291,19 +310,19 @@ model ProjectFile {
 // ============================================================
 
 model Notification {
-  id              String           @id @default(uuid())
+  id String @id @default(uuid())
 
-  userId          String
+  userId String
 
-  type            NotificationType
-  title           String
-  message         String
-  isRead          Boolean          @default(false)
+  type    NotificationType
+  title   String
+  message String
+  isRead  Boolean          @default(false)
 
-  createdAt       DateTime         @default(now())
-  readAt          DateTime?
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
 
-  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, isRead])

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import Sidebar from "@/components/dashboard/Sidebar";
 import TopNavbar from "@/components/dashboard/TopNavbar";
@@ -65,7 +66,6 @@ const agents: Agent[] = [
     type: "architect",
     status: "Active",
   },
-
   {
     id: "developer",
     name: "Developer Agent",
@@ -74,7 +74,6 @@ const agents: Agent[] = [
     type: "developer",
     status: "Active",
   },
-
   {
     id: "uiux",
     name: "UI/UX Agent",
@@ -83,7 +82,6 @@ const agents: Agent[] = [
     type: "uiux",
     status: "Active",
   },
-
   {
     id: "debugger",
     name: "Debugger Agent",
@@ -92,7 +90,6 @@ const agents: Agent[] = [
     type: "debugger",
     status: "Active",
   },
-
   {
     id: "testing",
     name: "Testing Agent",
@@ -101,7 +98,6 @@ const agents: Agent[] = [
     type: "testing",
     status: "Active",
   },
-
   {
     id: "documentation",
     name: "Documentation Agent",
@@ -121,10 +117,13 @@ const projectContextExamples = {
 
   webapp: `Project Type: Full-stack Web Application
 Frontend: Next.js / React / TypeScript
-Backend: Node.js
+Backend: Node.js / Express / TypeScript
 Database: PostgreSQL
+ORM: Prisma
 Authentication: JWT
-Deployment: Vercel`,
+AI: Gemini
+Frontend Port: 3000
+Backend Port: 5000`,
 
   java: `Project Type: Java Full-stack Application
 Frontend: HTML / CSS / JavaScript
@@ -255,7 +254,15 @@ const HISTORY_STORAGE_KEY = "devpilot-conversation-history";
 // PAGE
 // ============================================================
 
-export default function AgentsPage() {
+function AgentsPageContent()  {
+  // ==========================================================
+  // PROJECT ID FROM URL
+  // ==========================================================
+
+  const searchParams = useSearchParams();
+
+  const projectId = searchParams.get("projectId");
+
   // ==========================================================
   // AGENT STATE
   // ==========================================================
@@ -367,7 +374,9 @@ export default function AgentsPage() {
   // SAVE CURRENT CONVERSATION
   // ==========================================================
 
-  const saveConversationMessages = (messages: Message[]) => {
+  const saveConversationMessages = (
+    messages: Message[]
+  ) => {
     if (!selectedAgent || messages.length === 0) {
       return;
     }
@@ -375,6 +384,7 @@ export default function AgentsPage() {
     const hasUserMessage = messages.some(
       (message) => message.role === "user"
     );
+
     const hasAssistantMessage = messages.some(
       (message) => message.role === "assistant"
     );
@@ -386,35 +396,45 @@ export default function AgentsPage() {
     const now = new Date().toISOString();
 
     setSavedConversations((previous) => {
-      // Update the most recent conversation for this agent instead of
-      // creating duplicates after every AI response.
       const existingIndex = previous.findIndex(
-        (conversation) => conversation.agentId === selectedAgent.type
+        (conversation) =>
+          conversation.agentId === selectedAgent.type
       );
 
       let updated: ConversationHistory[];
 
       if (existingIndex >= 0) {
-        const existing = previous[existingIndex];
+        const existing =
+          previous[existingIndex];
+
         const updatedConversation: ConversationHistory = {
           ...existing,
           messages,
-          createdAt: existing.createdAt || now,
+          createdAt:
+            existing.createdAt || now,
         };
 
-        updated = previous.map((conversation, index) =>
-          index === existingIndex ? updatedConversation : conversation
+        updated = previous.map(
+          (conversation, index) =>
+            index === existingIndex
+              ? updatedConversation
+              : conversation
         );
       } else {
         const conversation: ConversationHistory = {
-          id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+          id: `${Date.now()}-${Math.random()
+            .toString(36)
+            .substring(2, 9)}`,
           agentId: selectedAgent.type,
           agentName: selectedAgent.name,
           messages,
           createdAt: now,
         };
 
-        updated = [conversation, ...previous].slice(0, 50);
+        updated = [
+          conversation,
+          ...previous,
+        ].slice(0, 50);
       }
 
       try {
@@ -423,7 +443,10 @@ export default function AgentsPage() {
           JSON.stringify(updated)
         );
       } catch (error) {
-        console.error("Failed to save conversation:", error);
+        console.error(
+          "Failed to save conversation:",
+          error
+        );
       }
 
       return updated;
@@ -474,9 +497,7 @@ export default function AgentsPage() {
       setSelectedAgent(agent);
     }
 
-    setHistory(
-      conversation.messages
-    );
+    setHistory(conversation.messages);
 
     const lastAssistantMessage =
       [...conversation.messages]
@@ -558,8 +579,7 @@ export default function AgentsPage() {
       return;
     }
 
-    const currentPrompt =
-      prompt.trim();
+    const currentPrompt = prompt.trim();
 
     setRunning(true);
     setError("");
@@ -567,135 +587,193 @@ export default function AgentsPage() {
     setCopied(false);
 
     try {
-      const apiResponse = await fetch(
-        "/api/ai-agent",
+      // ======================================================
+      // 1. GET REAL AGENTS FROM BACKEND
+      // ======================================================
+
+      const agentsResponse = await fetch(
+        "http://localhost:5000/api/agents",
         {
-          method: "POST",
-
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-
-          body: JSON.stringify({
-            agentType:
-              selectedAgent.type,
-
-            instruction:
-              agentInstructions[
-                selectedAgent.type
-              ],
-
-            prompt:
-              currentPrompt,
-
-            projectContext:
-              projectContext.trim(),
-          }),
+          method: "GET",
+          credentials: "include",
         }
       );
 
-      if (!apiResponse.ok) {
-        let message =
-          "Failed to execute AI agent.";
-
-        try {
-          const errorData =
-            await apiResponse.json();
-
-          message =
-            errorData?.error ||
-            message;
-        } catch {
-          // Ignore JSON parsing error
-        }
-
-        throw new Error(message);
-      }
-
-      if (!apiResponse.body) {
+      if (!agentsResponse.ok) {
         throw new Error(
-          "AI response stream is unavailable."
+          "Unable to connect to the AI agent backend."
         );
       }
 
-      const reader =
-        apiResponse.body.getReader();
-
-      const decoder =
-        new TextDecoder();
-
-      let accumulatedResponse = "";
-
-      while (true) {
-        const {
-          value,
-          done,
-        } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        const chunk =
-          decoder.decode(value, {
-            stream: true,
-          });
-
-        if (!chunk) {
-          continue;
-        }
-
-        accumulatedResponse +=
-          chunk;
-
-        setResponse(
-          accumulatedResponse
-        );
-      }
-
-      const finalChunk =
-        decoder.decode();
-
-      if (finalChunk) {
-        accumulatedResponse +=
-          finalChunk;
-
-        setResponse(
-          accumulatedResponse
-        );
-      }
+      const agentsData =
+        await agentsResponse.json();
 
       if (
-        !accumulatedResponse.trim()
+        !agentsData?.success ||
+        !Array.isArray(agentsData.agents)
       ) {
         throw new Error(
-          "AI returned an empty response."
+          "Invalid agent data received from backend."
         );
       }
 
       // ======================================================
-      // ADD TO CURRENT CONVERSATION
+      // 2. FIND DATABASE AGENT USING TYPE
+      // ======================================================
+
+      const backendAgent =
+        agentsData.agents.find(
+          (agent: {
+            id: string;
+            type: string;
+            name: string;
+            isActive: boolean;
+          }) =>
+            agent.type.toLowerCase() ===
+            selectedAgent.type.toLowerCase()
+        );
+
+      if (!backendAgent) {
+        throw new Error(
+          `${selectedAgent.name} is not available on the backend.`
+        );
+      }
+
+      if (!backendAgent.isActive) {
+        throw new Error(
+          `${selectedAgent.name} is currently inactive.`
+        );
+      }
+
+      // ======================================================
+      // 3. BUILD FINAL PROMPT
+      // ======================================================
+
+      const finalPrompt = `
+Agent Role:
+${agentInstructions[selectedAgent.type]}
+
+Project Context:
+${
+  projectContext.trim() ||
+  "No additional project context provided."
+}
+
+Connected Project ID:
+${projectId || "No project selected"}
+
+Important:
+If a connected project ID is provided, use the project's
+actual backend context as the source of truth.
+Do not replace the existing project architecture with a
+different framework, database, ORM, authentication system,
+or infrastructure unless the user explicitly requests it.
+
+User Task:
+${currentPrompt}
+`;
+
+      // ======================================================
+      // 4. EXECUTE REAL BACKEND AGENT
+      // ======================================================
+
+      const apiResponse = await fetch(
+        `http://localhost:5000/api/agents/${backendAgent.id}/execute`,
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          credentials: "include",
+
+          // IMPORTANT:
+          // projectId is now sent to backend
+          body: JSON.stringify({
+            prompt: finalPrompt,
+            projectId:
+              projectId || undefined,
+          }),
+        }
+      );
+
+      // ======================================================
+      // 5. HANDLE API ERROR
+      // ======================================================
+
+      const data =
+        await apiResponse.json();
+
+      if (
+        !apiResponse.ok ||
+        !data?.success
+      ) {
+        throw new Error(
+          data?.message ||
+            data?.error ||
+            "Failed to execute AI agent."
+        );
+      }
+
+      // ======================================================
+      // 6. GET GEMINI RESPONSE
+      // ======================================================
+
+      const generatedResponse =
+        data?.result?.response?.trim();
+
+      if (!generatedResponse) {
+        throw new Error(
+          "AI agent returned an empty response."
+        );
+      }
+
+      // ======================================================
+      // 7. DISPLAY RESPONSE
+      // ======================================================
+
+      setResponse(generatedResponse);
+
+      // ======================================================
+      // 8. SAVE CONVERSATION
       // ======================================================
 
       setHistory((previousHistory) => {
         const updatedHistory: Message[] = [
           ...previousHistory,
+
           {
             role: "user",
             content: currentPrompt,
           },
+
           {
             role: "assistant",
-            content: accumulatedResponse,
+            content: generatedResponse,
           },
         ];
 
-        // Persist only after the complete AI response has been received.
-        saveConversationMessages(updatedHistory);
+        saveConversationMessages(
+          updatedHistory
+        );
 
         return updatedHistory;
       });
+
+      // ======================================================
+      // 9. LOG EXECUTION ID
+      // ======================================================
+
+      console.log(
+        "AI Execution ID:",
+        data?.result?.executionId
+      );
+
+      console.log(
+        "Project ID:",
+        projectId
+      );
     } catch (error) {
       console.error(
         "AI Agent Error:",
@@ -800,11 +878,15 @@ export default function AgentsPage() {
       agent.status === "Busy"
   ).length;
 
-  const tasksCompleted = agents.reduce(
-    (total, agent) =>
-      total + (agent.type === "architect" ? 8 : 0),
-    0
-  );
+  const tasksCompleted =
+    agents.reduce(
+      (total, agent) =>
+        total +
+        (agent.type === "architect"
+          ? 8
+          : 0),
+      0
+    );
 
   // ==========================================================
   // AGENT LIST
@@ -813,31 +895,14 @@ export default function AgentsPage() {
   if (!selectedAgent) {
     return (
       <div className="flex min-h-screen bg-[#070B14] text-white">
-
-        {/* ==================================================
-            SIDEBAR
-        ================================================== */}
-
         <Sidebar />
 
-        {/* ==================================================
-            MAIN APPLICATION AREA
-        ================================================== */}
-
         <div className="flex min-w-0 flex-1 flex-col">
-
-          {/* TOP NAVBAR */}
           <TopNavbar />
 
-          {/* MAIN */}
           <main className="flex-1 p-6 md:p-8">
-
-            {/* PAGE HEADER */}
-
             <div className="mb-10">
-
               <div className="mb-3 flex items-center gap-3">
-
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-500/10">
                   <Sparkles
                     size={22}
@@ -855,13 +920,19 @@ export default function AgentsPage() {
                     for your software project.
                   </p>
                 </div>
-
               </div>
 
-              {/* SMALL SUMMARY */}
+              {projectId && (
+                <div className="mt-4 inline-flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-xs text-cyan-300">
+                  <Activity size={13} />
+                  Connected Project
+                  <span className="font-mono text-cyan-400">
+                    {projectId}
+                  </span>
+                </div>
+              )}
 
               <div className="mt-6 flex flex-wrap gap-3">
-
                 <div className="rounded-xl border border-white/10 bg-[#0F172A] px-4 py-3">
                   <p className="text-xs text-slate-500">
                     Total Agents
@@ -891,17 +962,10 @@ export default function AgentsPage() {
                     {busyAgents}
                   </p>
                 </div>
-
               </div>
-
             </div>
 
-            {/* ==================================================
-                AGENTS
-            ================================================== */}
-
             <div className="mb-5 flex items-center justify-between">
-
               <div>
                 <h2 className="text-xl font-semibold text-white">
                   Available Agents
@@ -915,11 +979,9 @@ export default function AgentsPage() {
               <div className="hidden rounded-full border border-white/10 bg-white/3 px-3 py-1.5 text-xs text-slate-400 sm:block">
                 {totalAgents} specialized agents
               </div>
-
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-
               {agents.map((agent) => (
                 <AgentCard
                   key={agent.id}
@@ -942,13 +1004,9 @@ export default function AgentsPage() {
                   }
                 />
               ))}
-
             </div>
-
           </main>
-
         </div>
-
       </div>
     );
   }
@@ -970,39 +1028,17 @@ export default function AgentsPage() {
 
   return (
     <div className="flex min-h-screen bg-[#070B14] text-white">
-
-      {/* ==================================================
-          SIDEBAR
-      ================================================== */}
-
       <Sidebar />
 
-      {/* ==================================================
-          MAIN APPLICATION AREA
-      ================================================== */}
-
       <div className="flex min-w-0 flex-1 flex-col">
-
-        {/* ==================================================
-            TOP NAVBAR
-        ================================================== */}
-
         <TopNavbar />
 
-        {/* ==================================================
-            MAIN CONTENT
-        ================================================== */}
-
         <main className="flex-1 p-6 md:p-8">
-
           <div className="mx-auto max-w-7xl">
 
-            {/* ==================================================
-                TOP NAVIGATION
-            ================================================== */}
+            {/* TOP NAVIGATION */}
 
             <div className="mb-5 flex items-center justify-between">
-
               <button
                 type="button"
                 onClick={handleBack}
@@ -1027,61 +1063,73 @@ export default function AgentsPage() {
                 "
               >
                 <ArrowLeft size={16} />
-
                 Back to Agents
               </button>
 
               <div className="flex items-center gap-2">
-
-                <div className="
-                  flex
-                  items-center
-                  gap-2
-                  rounded-full
-                  border
-                  border-emerald-500/20
-                  bg-emerald-500/5
-                  px-3
-                  py-1.5
-                  text-xs
-                  text-emerald-400
-                ">
+                <div
+                  className="
+                    flex
+                    items-center
+                    gap-2
+                    rounded-full
+                    border
+                    border-emerald-500/20
+                    bg-emerald-500/5
+                    px-3
+                    py-1.5
+                    text-xs
+                    text-emerald-400
+                  "
+                >
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-
                   Agent Ready
                 </div>
-
               </div>
-
             </div>
 
-            {/* ==================================================
-                AGENT HEADER
-            ================================================== */}
+            {/* PROJECT CONNECTION */}
 
-            <div className="
-              mb-5
-              rounded-2xl
-              border
-              border-white/10
-              bg-[#0B1220]
-              p-5
-            ">
+            {projectId && (
+              <div className="mb-5 flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-xs text-cyan-300">
+                <Activity size={14} />
 
+                <span>
+                  This AI execution is connected to project:
+                </span>
+
+                <span className="font-mono font-semibold text-cyan-400">
+                  {projectId}
+                </span>
+              </div>
+            )}
+
+            {/* AGENT HEADER */}
+
+            <div
+              className="
+                mb-5
+                rounded-2xl
+                border
+                border-white/10
+                bg-[#0B1220]
+                p-5
+              "
+            >
               <div className="flex items-center justify-between gap-4">
-
                 <div className="flex min-w-0 items-center gap-4">
-
-                  <div className="
-                    flex
-                    h-12
-                    w-12
-                    shrink-0
-                    items-center
-                    justify-center
-                    rounded-xl
-                    bg-cyan-500/10
-                  ">
+                  <div
+                    className="
+                      flex
+                      h-12
+                      w-12
+                      shrink-0
+                      items-center
+                      justify-center
+                      rounded-xl
+                      bg-cyan-500/10
+                    "
+                  >
                     <Bot
                       size={24}
                       className="text-cyan-400"
@@ -1089,103 +1137,101 @@ export default function AgentsPage() {
                   </div>
 
                   <div className="min-w-0">
-
                     <div className="flex items-center gap-3">
-
-                      <h2 className="
-                        truncate
-                        text-xl
-                        font-bold
-                        text-white
-                      ">
+                      <h2
+                        className="
+                          truncate
+                          text-xl
+                          font-bold
+                          text-white
+                        "
+                      >
                         {selectedAgent.name}
                       </h2>
 
-                      <span className="
-                        rounded-full
-                        bg-emerald-500/10
-                        px-2.5
-                        py-1
-                        text-[10px]
-                        font-medium
-                        text-emerald-400
-                      ">
+                      <span
+                        className="
+                          rounded-full
+                          bg-emerald-500/10
+                          px-2.5
+                          py-1
+                          text-[10px]
+                          font-medium
+                          text-emerald-400
+                        "
+                      >
                         Ready
                       </span>
-
                     </div>
 
-                    <p className="
-                      mt-1
-                      truncate
-                      text-sm
-                      text-slate-500
-                    ">
+                    <p
+                      className="
+                        mt-1
+                        truncate
+                        text-sm
+                        text-slate-500
+                      "
+                    >
                       {selectedAgent.description}
                     </p>
-
                   </div>
-
                 </div>
-
               </div>
-
             </div>
 
-            {/* ==================================================
-                WORKSPACE
-            ================================================== */}
+            {/* WORKSPACE */}
 
-            <div className="
-              rounded-2xl
-              border
-              border-white/10
-              bg-[#0B1220]
-            ">
-
-              {/* =================================================
-                  WORKSPACE HEADER
-              ================================================= */}
-
-              <div className="
-                flex
-                items-center
-                justify-between
-                gap-4
-                border-b
+            <div
+              className="
+                rounded-2xl
+                border
                 border-white/10
-                p-5
-              ">
+                bg-[#0B1220]
+              "
+            >
+              {/* WORKSPACE HEADER */}
 
+              <div
+                className="
+                  flex
+                  items-center
+                  justify-between
+                  gap-4
+                  border-b
+                  border-white/10
+                  p-5
+                "
+              >
                 <div>
-
-                  <h3 className="
-                    text-lg
-                    font-semibold
-                    text-white
-                  ">
+                  <h3
+                    className="
+                      text-lg
+                      font-semibold
+                      text-white
+                    "
+                  >
                     Agent Workspace
                   </h3>
 
-                  <p className="
-                    mt-1
-                    text-xs
-                    text-slate-500
-                  ">
+                  <p
+                    className="
+                      mt-1
+                      text-xs
+                      text-slate-500
+                    "
+                  >
                     Give the agent a task or question.
                   </p>
-
                 </div>
 
-                {/* ACTIONS */}
-
-                <div className="
-                  flex
-                  shrink-0
-                  items-center
-                  gap-2
-                ">
-
+                <div
+                  className="
+                    flex
+                    shrink-0
+                    items-center
+                    gap-2
+                  "
+                >
                   {/* HISTORY */}
 
                   <button
@@ -1222,18 +1268,19 @@ export default function AgentsPage() {
                     History
 
                     {agentHistory.length > 0 && (
-                      <span className="
-                        rounded-full
-                        bg-cyan-500/10
-                        px-1.5
-                        py-0.5
-                        text-[10px]
-                        text-cyan-300
-                      ">
+                      <span
+                        className="
+                          rounded-full
+                          bg-cyan-500/10
+                          px-1.5
+                          py-0.5
+                          text-[10px]
+                          text-cyan-300
+                        "
+                      >
                         {agentHistory.length}
                       </span>
                     )}
-
                   </button>
 
                   {/* NEW CHAT */}
@@ -1268,51 +1315,52 @@ export default function AgentsPage() {
                       "
                     >
                       <Plus size={14} />
-
                       New Chat
                     </button>
                   )}
-
                 </div>
-
               </div>
 
-              {/* =================================================
-                  HISTORY PANEL
-              ================================================= */}
+              {/* HISTORY PANEL */}
 
               {showHistory && (
-                <div className="
-                  border-b
-                  border-white/10
-                  bg-[#080E19]
-                ">
-
-                  <div className="
-                    flex
-                    items-center
-                    justify-between
+                <div
+                  className="
                     border-b
-                    border-white/5
-                    px-5
-                    py-3
-                  ">
-
-                    <div className="
+                    border-white/10
+                    bg-[#080E19]
+                  "
+                >
+                  <div
+                    className="
                       flex
                       items-center
-                      gap-2
-                    ">
+                      justify-between
+                      border-b
+                      border-white/5
+                      px-5
+                      py-3
+                    "
+                  >
+                    <div
+                      className="
+                        flex
+                        items-center
+                        gap-2
+                      "
+                    >
                       <History
                         size={15}
                         className="text-cyan-400"
                       />
 
-                      <span className="
-                        text-sm
-                        font-semibold
-                        text-white
-                      ">
+                      <span
+                        className="
+                          text-sm
+                          font-semibold
+                          text-white
+                        "
+                      >
                         Conversation History
                       </span>
                     </div>
@@ -1335,18 +1383,16 @@ export default function AgentsPage() {
                         Clear All
                       </button>
                     )}
-
                   </div>
 
-                  {/* EMPTY */}
-
                   {agentHistory.length === 0 ? (
-                    <div className="
-                      px-5
-                      py-8
-                      text-center
-                    ">
-
+                    <div
+                      className="
+                        px-5
+                        py-8
+                        text-center
+                      "
+                    >
                       <History
                         size={28}
                         className="
@@ -1356,34 +1402,36 @@ export default function AgentsPage() {
                         "
                       />
 
-                      <p className="
-                        text-sm
-                        font-medium
-                        text-slate-400
-                      ">
+                      <p
+                        className="
+                          text-sm
+                          font-medium
+                          text-slate-400
+                        "
+                      >
                         No conversation history
                       </p>
 
-                      <p className="
-                        mt-1
-                        text-xs
-                        text-slate-600
-                      ">
+                      <p
+                        className="
+                          mt-1
+                          text-xs
+                          text-slate-600
+                        "
+                      >
                         Completed chats will
                         appear here.
                       </p>
-
                     </div>
                   ) : (
-
-                    <div className="
-                      max-h-72
-                      overflow-y-auto
-                    ">
-
+                    <div
+                      className="
+                        max-h-72
+                        overflow-y-auto
+                      "
+                    >
                       {agentHistory.map(
                         (conversation) => {
-
                           const firstUserMessage =
                             conversation.messages.find(
                               (message) =>
@@ -1409,7 +1457,6 @@ export default function AgentsPage() {
                                 hover:bg-white/3
                               "
                             >
-
                               <button
                                 type="button"
                                 onClick={() =>
@@ -1423,25 +1470,28 @@ export default function AgentsPage() {
                                   text-left
                                 "
                               >
-
-                                <p className="
-                                  truncate
-                                  text-sm
-                                  font-medium
-                                  text-slate-200
-                                ">
+                                <p
+                                  className="
+                                    truncate
+                                    text-sm
+                                    font-medium
+                                    text-slate-200
+                                  "
+                                >
                                   {firstUserMessage?.content ||
                                     "Conversation"}
                                 </p>
 
-                                <div className="
-                                  mt-1
-                                  flex
-                                  items-center
-                                  gap-2
-                                  text-[10px]
-                                  text-slate-600
-                                ">
+                                <div
+                                  className="
+                                    mt-1
+                                    flex
+                                    items-center
+                                    gap-2
+                                    text-[10px]
+                                    text-slate-600
+                                  "
+                                >
                                   <Clock
                                     size={11}
                                   />
@@ -1450,7 +1500,6 @@ export default function AgentsPage() {
                                     conversation.createdAt
                                   ).toLocaleString()}
                                 </div>
-
                               </button>
 
                               <button
@@ -1480,58 +1529,58 @@ export default function AgentsPage() {
                                   size={14}
                                 />
                               </button>
-
                             </div>
                           );
                         }
                       )}
-
                     </div>
                   )}
-
                 </div>
               )}
 
-              {/* =================================================
-                  CONTEXT INDICATOR
-              ================================================= */}
+              {/* CONTEXT INDICATOR */}
 
               {history.length > 0 && (
-                <div className="
-                  flex
-                  items-center
-                  justify-between
-                  border-b
-                  border-white/5
-                  bg-cyan-500/3
-                  px-5
-                  py-2.5
-                ">
-
-                  <div className="
+                <div
+                  className="
                     flex
                     items-center
-                    gap-2
-                  ">
-
+                    justify-between
+                    border-b
+                    border-white/5
+                    bg-cyan-500/3
+                    px-5
+                    py-2.5
+                  "
+                >
+                  <div
+                    className="
+                      flex
+                      items-center
+                      gap-2
+                    "
+                  >
                     <Activity
                       size={13}
                       className="text-cyan-400"
                     />
 
-                    <span className="
-                      text-xs
-                      text-cyan-300
-                    ">
+                    <span
+                      className="
+                        text-xs
+                        text-cyan-300
+                      "
+                    >
                       Conversation context active
                     </span>
-
                   </div>
 
-                  <span className="
-                    text-[10px]
-                    text-slate-600
-                  ">
+                  <span
+                    className="
+                      text-[10px]
+                      text-slate-600
+                    "
+                  >
                     {
                       history.filter(
                         (message) =>
@@ -1541,76 +1590,78 @@ export default function AgentsPage() {
                     }{" "}
                     exchanges
                   </span>
-
                 </div>
               )}
 
-              {/* =================================================
-                  MAIN GRID
-              ================================================= */}
+              {/* MAIN GRID */}
 
-              <div className="
-                grid
-                gap-6
-                p-5
-                lg:grid-cols-2
-              ">
-
-                {/* =================================================
-                    LEFT
-                ================================================= */}
+              <div
+                className="
+                  grid
+                  gap-6
+                  p-5
+                  lg:grid-cols-2
+                "
+              >
+                {/* LEFT */}
 
                 <div className="space-y-5">
-
                   {/* PROJECT CONTEXT */}
 
-                  <div className="
-                    rounded-2xl
-                    border
-                    border-cyan-500/10
-                    bg-cyan-500/3
-                    p-4
-                  ">
-
-                    <div className="
-                      mb-3
-                      flex
-                      items-center
-                      gap-2
-                    ">
-
+                  <div
+                    className="
+                      rounded-2xl
+                      border
+                      border-cyan-500/10
+                      bg-cyan-500/3
+                      p-4
+                    "
+                  >
+                    <div
+                      className="
+                        mb-3
+                        flex
+                        items-center
+                        gap-2
+                      "
+                    >
                       <Sparkles
                         size={15}
                         className="text-cyan-400"
                       />
 
-                      <span className="
-                        text-sm
-                        font-semibold
-                        text-white
-                      ">
+                      <span
+                        className="
+                          text-sm
+                          font-semibold
+                          text-white
+                        "
+                      >
                         Project Context
                       </span>
 
-                      <span className="
-                        rounded-full
-                        bg-white/5
-                        px-2
-                        py-0.5
-                        text-[9px]
-                        text-slate-500
-                      ">
+                      <span
+                        className="
+                          rounded-full
+                          bg-white/5
+                          px-2
+                          py-0.5
+                          text-[9px]
+                          text-slate-500
+                        "
+                      >
                         Optional
                       </span>
-
                     </div>
 
-                    <p className="
-                      mb-3
-                      text-xs
-                      leading-5
-                      text-slate-600
-                    ">
+                    <p
+                      className="
+                        mb-3
+                        text-xs
+                        leading-5
+                        text-slate-600
+                      "
+                    >
                       Give the agent information
                       about your project so
                       responses are more specific
@@ -1618,7 +1669,6 @@ export default function AgentsPage() {
                     </p>
 
                     <div className="relative">
-
                       <select
                         value={
                           contextType
@@ -1648,7 +1698,6 @@ export default function AgentsPage() {
                           disabled:opacity-50
                         "
                       >
-
                         <option value="none">
                           No Project Context
                         </option>
@@ -1668,7 +1717,6 @@ export default function AgentsPage() {
                         <option value="custom">
                           Custom Project Context
                         </option>
-
                       </select>
 
                       <ChevronDown
@@ -1682,7 +1730,6 @@ export default function AgentsPage() {
                           text-slate-600
                         "
                       />
-
                     </div>
 
                     {contextType !==
@@ -1722,33 +1769,33 @@ database, requirements, etc.
                         "
                       />
                     )}
-
                   </div>
 
                   {/* TASK */}
 
                   <div>
-
-                    <div className="
-                      mb-2
-                      flex
-                      items-center
-                      gap-2
-                    ">
-
+                    <div
+                      className="
+                        mb-2
+                        flex
+                        items-center
+                        gap-2
+                      "
+                    >
                       <Activity
                         size={15}
                         className="text-cyan-400"
                       />
 
-                      <label className="
-                        text-sm
-                        font-semibold
-                        text-white
-                      ">
+                      <label
+                        className="
+                          text-sm
+                          font-semibold
+                          text-white
+                        "
+                      >
                         Give the agent a task
                       </label>
-
                     </div>
 
                     <textarea
@@ -1785,15 +1832,16 @@ database, requirements, etc.
                       "
                     />
 
-                    <p className="
-                      mt-2
-                      text-[10px]
-                      text-slate-700
-                    ">
+                    <p
+                      className="
+                        mt-2
+                        text-[10px]
+                        text-slate-700
+                      "
+                    >
                       Enter to run • Shift + Enter
                       for new line
                     </p>
-
                   </div>
 
                   {/* RUN */}
@@ -1823,234 +1871,235 @@ database, requirements, etc.
                       disabled:opacity-40
                     "
                   >
-
                     {running ? (
                       <>
                         <Loader2
                           size={17}
                           className="animate-spin"
                         />
-
                         Agent is thinking...
                       </>
                     ) : (
                       <>
                         <Send size={17} />
-
                         Run Agent
                       </>
                     )}
-
                   </button>
-
                 </div>
 
-                {/* =================================================
-                    RIGHT OUTPUT
-                ================================================= */}
+                {/* RIGHT OUTPUT */}
 
-                <div className="
-                  flex
-                  min-h-125
-                  flex-col
-                  overflow-hidden
-                  rounded-2xl
-                  border
-                  border-white/10
-                  bg-[#080E19]
-                ">
-
+                <div
+                  className="
+                    flex
+                    min-h-125
+                    flex-col
+                    overflow-hidden
+                    rounded-2xl
+                    border
+                    border-white/10
+                    bg-[#080E19]
+                  "
+                >
                   {/* OUTPUT HEADER */}
 
-                  <div className="
-                    flex
-                    items-center
-                    justify-between
-                    border-b
-                    border-white/10
-                    px-5
-                    py-4
-                  ">
-
+                  <div
+                    className="
+                      flex
+                      items-center
+                      justify-between
+                      border-b
+                      border-white/10
+                      px-5
+                      py-4
+                    "
+                  >
                     <div>
-
-                      <h3 className="
-                        text-sm
-                        font-semibold
-                        text-white
-                      ">
+                      <h3
+                        className="
+                          text-sm
+                          font-semibold
+                          text-white
+                        "
+                      >
                         Agent Output
                       </h3>
 
-                      <p className="
-                        mt-1
-                        text-[10px]
-                        text-slate-600
-                      ">
+                      <p
+                        className="
+                          mt-1
+                          text-[10px]
+                          text-slate-600
+                        "
+                      >
                         Gemini-powered response
                       </p>
-
                     </div>
 
-                    <div className="
-                      flex
-                      items-center
-                      gap-2
-                    ">
+                    <div
+                      className="
+                        flex
+                        items-center
+                        gap-2
+                      "
+                    >
+                      {response &&
+                        !running && (
+                          <button
+                            type="button"
+                            onClick={
+                              copyResponse
+                            }
+                            className="
+                              flex
+                              items-center
+                              gap-1.5
+                              rounded-lg
+                              border
+                              border-white/10
+                              bg-white/3
+                              px-2.5
+                              py-1.5
+                              text-[10px]
+                              text-slate-400
+                              transition
+                              hover:bg-white/5
+                              hover:text-white
+                            "
+                          >
+                            {copied ? (
+                              <>
+                                <Check
+                                  size={12}
+                                />
+                                Copied
+                              </>
+                            ) : (
+                              <>
+                                <Copy
+                                  size={12}
+                                />
+                                Copy
+                              </>
+                            )}
+                          </button>
+                        )}
 
                       {response &&
                         !running && (
-                        <button
-                          type="button"
-                          onClick={
-                            copyResponse
-                          }
-                          className="
-                            flex
-                            items-center
-                            gap-1.5
-                            rounded-lg
-                            border
-                            border-white/10
-                            bg-white/3
-                            px-2.5
-                            py-1.5
-                            text-[10px]
-                            text-slate-400
-                            transition
-                            hover:bg-white/5
-                            hover:text-white
-                          "
-                        >
-
-                          {copied ? (
-                            <>
-                              <Check
-                                size={12}
-                              />
-
-                              Copied
-                            </>
-                          ) : (
-                            <>
-                              <Copy
-                                size={12}
-                              />
-
-                              Copy
-                            </>
-                          )}
-
-                        </button>
-                      )}
-
-                      {response &&
-                        !running && (
-                        <span className="
-                          rounded-full
-                          bg-emerald-500/10
-                          px-2.5
-                          py-1
-                          text-[10px]
-                          font-medium
-                          text-emerald-400
-                        ">
-                          Completed
-                        </span>
-                      )}
-
+                          <span
+                            className="
+                              rounded-full
+                              bg-emerald-500/10
+                              px-2.5
+                              py-1
+                              text-[10px]
+                              font-medium
+                              text-emerald-400
+                            "
+                          >
+                            Completed
+                          </span>
+                        )}
                     </div>
-
                   </div>
 
                   {/* OUTPUT BODY */}
 
-                  <div className="
-                    flex-1
-                    overflow-y-auto
-                    p-5
-                  ">
-
+                  <div
+                    className="
+                      flex-1
+                      overflow-y-auto
+                      p-5
+                    "
+                  >
                     {/* THINKING */}
 
                     {running &&
                       !response && (
-                      <div className="
-                        flex
-                        min-h-105
-                        flex-col
-                        items-center
-                        justify-center
-                        text-center
-                      ">
-
-                        <div className="
-                          flex
-                          h-14
-                          w-14
-                          items-center
-                          justify-center
-                          rounded-2xl
-                          bg-cyan-500/10
-                        ">
-
-                          <Sparkles
-                            size={24}
+                        <div
+                          className="
+                            flex
+                            min-h-105
+                            flex-col
+                            items-center
+                            justify-center
+                            text-center
+                          "
+                        >
+                          <div
                             className="
+                              flex
+                              h-14
+                              w-14
+                              items-center
+                              justify-center
+                              rounded-2xl
+                              bg-cyan-500/10
+                            "
+                          >
+                            <Sparkles
+                              size={24}
+                              className="
+                                animate-pulse
+                                text-cyan-400
+                              "
+                            />
+                          </div>
+
+                          <p
+                            className="
+                              mt-4
+                              text-sm
+                              font-medium
+                              text-white
+                            "
+                          >
+                            {selectedAgent.name}{" "}
+                            is analyzing...
+                          </p>
+
+                          <p
+                            className="
+                              mt-1
+                              max-w-xs
+                              text-xs
+                              leading-5
+                              text-slate-600
+                            "
+                          >
+                            Gemini AI is processing
+                            your request.
+                          </p>
+                        </div>
+                      )}
+
+                    {/* RESPONSE */}
+
+                    {response && (
+                      <div
+                        className="
+                          whitespace-pre-wrap
+                          text-sm
+                          leading-7
+                          text-slate-300
+                        "
+                      >
+                        {response}
+
+                        {running && (
+                          <span
+                            className="
+                              ml-1
+                              inline-block
                               animate-pulse
                               text-cyan-400
                             "
-                          />
-
-                        </div>
-
-                        <p className="
-                          mt-4
-                          text-sm
-                          font-medium
-                          text-white
-                        ">
-                          {selectedAgent.name}
-                          {" "}
-                          is analyzing...
-                        </p>
-
-                        <p className="
-                          mt-1
-                          max-w-xs
-                          text-xs
-                          leading-5
-                          text-slate-600
-                        ">
-                          Gemini AI is processing
-                          your request.
-                        </p>
-
-                      </div>
-                    )}
-
-                    {/* STREAMING */}
-
-                    {running &&
-                      response && (
-                      <div className="
-                        whitespace-pre-wrap
-                        text-sm
-                        leading-7
-                        text-slate-300
-                      ">
-
-                        {response}
-
-                        <span className="
-                          ml-1
-                          inline-block
-                          animate-pulse
-                          text-cyan-400
-                        ">
-                          ▌
-                        </span>
-
+                          >
+                            ▌
+                          </span>
+                        )}
                       </div>
                     )}
 
@@ -2059,77 +2108,85 @@ database, requirements, etc.
                     {!running &&
                       !response &&
                       !error && (
-                      <div className="
-                        flex
-                        min-h-105
-                        flex-col
-                        items-center
-                        justify-center
-                        text-center
-                      ">
+                        <div
+                          className="
+                            flex
+                            min-h-105
+                            flex-col
+                            items-center
+                            justify-center
+                            text-center
+                          "
+                        >
+                          <div
+                            className="
+                              flex
+                              h-14
+                              w-14
+                              items-center
+                              justify-center
+                              rounded-2xl
+                              bg-white/3
+                            "
+                          >
+                            <Bot
+                              size={24}
+                              className="text-slate-700"
+                            />
+                          </div>
 
-                        <div className="
-                          flex
-                          h-14
-                          w-14
-                          items-center
-                          justify-center
-                          rounded-2xl
-                          bg-white/3
-                        ">
+                          <p
+                            className="
+                              mt-4
+                              text-sm
+                              font-medium
+                              text-slate-500
+                            "
+                          >
+                            Ready for your instruction
+                          </p>
 
-                          <Bot
-                            size={24}
-                            className="text-slate-700"
-                          />
-
+                          <p
+                            className="
+                              mt-1
+                              max-w-xs
+                              text-xs
+                              leading-5
+                              text-slate-700
+                            "
+                          >
+                            Give the agent a task and
+                            its response will appear here.
+                          </p>
                         </div>
-
-                        <p className="
-                          mt-4
-                          text-sm
-                          font-medium
-                          text-slate-500
-                        ">
-                          Ready for your instruction
-                        </p>
-
-                        <p className="
-                          mt-1
-                          max-w-xs
-                          text-xs
-                          leading-5
-                          text-slate-700
-                        ">
-                          Give the agent a task and
-                          its response will appear here.
-                        </p>
-
-                      </div>
-                    )}
+                      )}
 
                     {/* ERROR */}
 
                     {error && (
-                      <div className="
-                        rounded-2xl
-                        border
-                        border-red-500/20
-                        bg-red-500/5
-                        p-4
-                      ">
-
-                        <div className="
-                          flex
-                          items-center
-                          justify-between
-                        ">
-
-                          <p className="
-                            text-xs
-                            font-semibold
-                            text-red-400
-                          ">
+                      <div
+                        className="
+                          rounded-2xl
+                          border
+                          border-red-500/20
+                          bg-red-500/5
+                          p-4
+                        "
+                      >
+                        <div
+                          className="
+                            flex
+                            items-center
+                            justify-between
+                          "
+                        >
+                          <p
+                            className="
+                              text-xs
+                              font-semibold
+                              text-red-400
+                            "
+                          >
                             Agent Error
                           </p>
 
@@ -2145,50 +2202,47 @@ database, requirements, etc.
                           >
                             <X size={14} />
                           </button>
-
                         </div>
 
-                        <p className="
-                          mt-2
-                          whitespace-pre-wrap
-                          text-xs
-                          leading-5
-                          text-red-300/70
-                        ">
+                        <p
+                          className="
+                            mt-2
+                            whitespace-pre-wrap
+                            text-xs
+                            leading-5
+                            text-red-300/70
+                          "
+                        >
                           {error}
                         </p>
-
                       </div>
                     )}
-
-                    {/* FINAL RESPONSE */}
-
-                    {!running &&
-                      response && (
-                      <div className="
-                        whitespace-pre-wrap
-                        text-sm
-                        leading-7
-                        text-slate-300
-                      ">
-                        {response}
-                      </div>
-                    )}
-
                   </div>
-
                 </div>
-
               </div>
-
             </div>
-
           </div>
-
         </main>
-
       </div>
-
     </div>
+  );
+}
+export default function AgentsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#070B14] text-white">
+          <div className="flex items-center gap-3 text-sm text-slate-400">
+            <Loader2
+              size={18}
+              className="animate-spin text-cyan-400"
+            />
+            Loading AI Agents...
+          </div>
+        </div>
+      }
+    >
+      <AgentsPageContent />
+    </Suspense>
   );
 }

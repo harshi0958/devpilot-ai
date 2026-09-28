@@ -345,7 +345,9 @@ ${prompt.trim()}
       | REAL BACKEND API
       |--------------------------------------------------------------------------
       */
-
+      console.log("🚀 RUN AGENT STARTED");
+console.log("Agent ID:", agentId);
+console.log("API URL:", `http://localhost:5000/api/agents/${agentId}/execute`);
       const apiResponse = await fetch(`http://localhost:5000/api/agents/${agentId}/execute`, {
   method: "POST",
   headers: {

@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { type Project } from "@/data/projects";
@@ -17,16 +17,145 @@ export default function CreateProjectModal({
   onCreate,
 }: CreateProjectModalProps) {
   const [name, setName] = useState("");
-const [description, setDescription] = useState("");
-const [tech, setTech] = useState("Next.js");
+  const [description, setDescription] = useState("");
+  const [tech, setTech] = useState("Next.js");
+
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState("");
+
   if (!isOpen) return null;
+
+  /*
+  |--------------------------------------------------------------------------
+  | Create Project
+  |--------------------------------------------------------------------------
+  */
+
+  const handleCreateProject = async () => {
+    if (!name.trim()) {
+      setError("Project name is required.");
+      return;
+    }
+
+    setIsCreating(true);
+    setError("");
+
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/projects",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            name: name.trim(),
+            description: description.trim(),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to create project."
+        );
+      }
+
+      /*
+      |--------------------------------------------------------------------------
+      | Convert Backend Project → Frontend Project
+      |--------------------------------------------------------------------------
+      */
+
+      const backendProject = data.project;
+
+      const newProject: Project = {
+        id: backendProject.id,
+
+        name: backendProject.name,
+
+        description:
+          backendProject.description || "",
+
+        status: "Building",
+
+        progress: 0,
+
+        members:
+          backendProject._count?.members ?? 1,
+
+        agents: 1,
+
+        github: "",
+
+        deployment: "",
+
+        techStack: [tech],
+
+        agentsActive: 1,
+
+        membersOnline: 1,
+
+        files:
+          backendProject._count?.files ?? 0,
+
+        tasks: 0,
+
+        pendingTasks: 0,
+
+        archived: false,
+      };
+
+      /*
+      |--------------------------------------------------------------------------
+      | Send Created Project to Parent
+      |--------------------------------------------------------------------------
+      */
+
+      onCreate(newProject);
+
+      /*
+      |--------------------------------------------------------------------------
+      | Reset Form
+      |--------------------------------------------------------------------------
+      */
+
+      setName("");
+      setDescription("");
+      setTech("Next.js");
+      setError("");
+    } catch (error) {
+      console.error("Create Project Error:", error);
+
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to create project."
+      );
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   return (
     <>
       {/* Backdrop */}
       <div
-        onClick={onClose}
-        className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm"
+        onClick={() => {
+          if (!isCreating) {
+            onClose();
+          }
+        }}
+        className="
+          fixed
+          inset-0
+          z-50
+          bg-black/70
+          backdrop-blur-sm
+        "
       />
 
       {/* Modal */}
@@ -49,7 +178,6 @@ const [tech, setTech] = useState("Next.js");
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/10 p-6">
-
           <div>
             <h2 className="text-2xl font-bold text-white">
               Create New Project
@@ -61,22 +189,27 @@ const [tech, setTech] = useState("Next.js");
           </div>
 
           <button
-            onClick={onClose}
+            onClick={() => {
+              if (!isCreating) {
+                onClose();
+              }
+            }}
+            disabled={isCreating}
             className="
               rounded-xl
               p-2
               transition
               hover:bg-white/10
+              disabled:cursor-not-allowed
+              disabled:opacity-50
             "
           >
             <X className="text-white" />
           </button>
-
         </div>
 
         {/* Body */}
         <div className="space-y-6 p-6">
-
           {/* Project Name */}
           <div>
             <label className="mb-2 block text-sm font-medium text-white">
@@ -86,8 +219,12 @@ const [tech, setTech] = useState("Next.js");
             <input
               type="text"
               value={name}
-               onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setError("");
+              }}
               placeholder="Enter project name"
+              disabled={isCreating}
               className="
                 w-full
                 rounded-xl
@@ -100,6 +237,8 @@ const [tech, setTech] = useState("Next.js");
                 outline-none
                 transition
                 focus:border-cyan-500
+                disabled:cursor-not-allowed
+                disabled:opacity-60
               "
             />
           </div>
@@ -113,8 +252,12 @@ const [tech, setTech] = useState("Next.js");
             <textarea
               rows={4}
               value={description}
-  onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                setError("");
+              }}
               placeholder="Describe your project..."
+              disabled={isCreating}
               className="
                 w-full
                 rounded-xl
@@ -127,6 +270,8 @@ const [tech, setTech] = useState("Next.js");
                 outline-none
                 transition
                 focus:border-cyan-500
+                disabled:cursor-not-allowed
+                disabled:opacity-60
               "
             />
           </div>
@@ -138,8 +283,11 @@ const [tech, setTech] = useState("Next.js");
             </label>
 
             <select
-            value={tech}
-  onChange={(e) => setTech(e.target.value)}
+              value={tech}
+              onChange={(e) =>
+                setTech(e.target.value)
+              }
+              disabled={isCreating}
               className="
                 w-full
                 rounded-xl
@@ -151,6 +299,8 @@ const [tech, setTech] = useState("Next.js");
                 text-white
                 outline-none
                 focus:border-cyan-500
+                disabled:cursor-not-allowed
+                disabled:opacity-60
               "
             >
               <option>Next.js</option>
@@ -169,6 +319,7 @@ const [tech, setTech] = useState("Next.js");
             </label>
 
             <select
+              disabled={isCreating}
               className="
                 w-full
                 rounded-xl
@@ -180,6 +331,8 @@ const [tech, setTech] = useState("Next.js");
                 text-white
                 outline-none
                 focus:border-cyan-500
+                disabled:cursor-not-allowed
+                disabled:opacity-60
               "
             >
               <option>Private</option>
@@ -188,13 +341,30 @@ const [tech, setTech] = useState("Next.js");
             </select>
           </div>
 
+          {/* Error */}
+          {error && (
+            <div
+              className="
+                rounded-xl
+                border
+                border-red-500/20
+                bg-red-500/10
+                px-4
+                py-3
+                text-sm
+                text-red-400
+              "
+            >
+              {error}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="flex justify-end gap-3 border-t border-white/10 p-6">
-
           <button
             onClick={onClose}
+            disabled={isCreating}
             className="
               rounded-xl
               border
@@ -204,70 +374,41 @@ const [tech, setTech] = useState("Next.js");
               text-white
               transition
               hover:bg-white/10
+              disabled:cursor-not-allowed
+              disabled:opacity-50
             "
           >
             Cancel
           </button>
 
           <button
-  onClick={() => {
-    if (!name.trim()) return;
+            onClick={handleCreateProject}
+            disabled={isCreating}
+            className="
+              flex
+              items-center
+              gap-2
+              rounded-xl
+              bg-cyan-500
+              px-5
+              py-3
+              font-semibold
+              text-black
+              transition
+              hover:bg-cyan-400
+              disabled:cursor-not-allowed
+              disabled:opacity-60
+            "
+          >
+            {isCreating && (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
 
-    onCreate({
-  id: name.toLowerCase().replace(/\s+/g, "-"),
-
-  name,
-
-  description,
-
-  status: "Building",
-
-  progress: 0,
-
-  members: 1,
-
-  agents: 1,
-
-  github: "",
-
-  deployment: "",
-
-  techStack: [tech],
-
-  agentsActive: 1,
-
-  membersOnline: 1,
-
-  files: 0,
-
-  tasks: 0,
-
-  pendingTasks: 0,
-  archived: false,
-});
-
-    setName("");
-    setDescription("");
-    setTech("Next.js");
-
-    onClose();
-  }}
-  className="
-    rounded-xl
-    bg-cyan-500
-    px-5
-    py-3
-    font-semibold
-    text-black
-    transition
-    hover:bg-cyan-400
-  "
->
-  Create Project
-</button>
-
+            {isCreating
+              ? "Creating..."
+              : "Create Project"}
+          </button>
         </div>
-
       </div>
     </>
   );

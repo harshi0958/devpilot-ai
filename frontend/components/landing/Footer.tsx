@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ArrowRight, ArrowUpRight } from "lucide-react";
 import {
   FaGithub,
@@ -9,54 +10,75 @@ import {
 } from "react-icons/fa6";
 
 const productLinks = [
-  "Features",
-  "Agents",
-  "Pricing",
-  "Roadmap",
+  { label: "Features", href: "/#features" },
+  { label: "Agents", href: "/#agents" },
+  { label: "Pricing", href: "/#pricing" },
+  { label: "Roadmap", href: "/coming-soon?feature=Roadmap" },
 ];
 
 const resourceLinks = [
-  "Docs",
-  "API",
-  "Blog",
-  "Community",
+  { label: "Docs", href: "/docs" },
+  { label: "API", href: "/coming-soon?feature=API" },
+  { label: "Blog", href: "/coming-soon?feature=Blog" },
+  { label: "Community", href: "/coming-soon?feature=Community" },
 ];
 
 const companyLinks = [
-  "About",
-  "Careers",
-  "Contact",
-  "Press",
+  { label: "About", href: "/coming-soon?feature=About" },
+  { label: "Careers", href: "/coming-soon?feature=Careers" },
+  { label: "Contact", href: "/contact" },
+  { label: "Press", href: "/coming-soon?feature=Press" },
 ];
 
 const legalLinks = [
-  "Privacy",
-  "Terms",
-  "Cookies",
-  "Licenses",
+  { label: "Privacy", href: "/coming-soon?feature=Privacy" },
+  { label: "Terms", href: "/coming-soon?feature=Terms" },
+  { label: "Cookies", href: "/coming-soon?feature=Cookies" },
+  { label: "Licenses", href: "/coming-soon?feature=Licenses" },
+];
+
+const socialLinks = [
+  {
+    label: "GitHub",
+    href: "https://github.com/harshi0958/devpilot-ai",
+    icon: FaGithub,
+  },
+  {
+    label: "X",
+    href: "https://x.com",
+    icon: FaXTwitter,
+  },
+  {
+    label: "LinkedIn",
+    href: "https://www.linkedin.com",
+    icon: FaLinkedin,
+  },
+  {
+    label: "Discord",
+    href: "https://discord.com",
+    icon: FaDiscord,
+  },
 ];
 
 export default function Footer() {
   return (
-    <footer className="relative mt-32 border-t border-white/10 overflow-hidden">
+    <footer className="relative mt-32 overflow-hidden border-t border-white/10">
 
       {/* Background Glow */}
-      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top,rgba(6,182,212,0.08),transparent_70%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(6,182,212,0.08),transparent_70%)]" />
 
       <div className="relative mx-auto max-w-7xl px-6 py-20">
 
-        {/* ===================== TOP GRID ===================== */}
-
+        {/* TOP GRID */}
         <div className="grid gap-14 lg:grid-cols-[2fr_1fr_1fr_1fr_1fr]">
 
-          {/* ================================================= */}
           {/* BRAND */}
-          {/* ================================================= */}
-
           <div className="max-w-107.5">
 
-            <div className="flex items-center gap-4">
-
+            <Link
+              href="/"
+              className="flex items-center gap-4"
+            >
               <img
                 src="/branding/logo.png"
                 alt="DevPilot AI"
@@ -64,7 +86,6 @@ export default function Footer() {
               />
 
               <div>
-
                 <h2 className="text-3xl font-bold text-white">
                   DevPilot
                   <span className="text-cyan-400"> AI</span>
@@ -73,10 +94,8 @@ export default function Footer() {
                 <p className="text-sm text-slate-400">
                   Autonomous Software Engineer
                 </p>
-
               </div>
-
-            </div>
+            </Link>
 
             <p className="mt-8 leading-8 text-slate-400">
               DevPilot AI is an autonomous multi-agent software engineering
@@ -85,14 +104,18 @@ export default function Footer() {
             </p>
 
             {/* Social Icons */}
-
             <div className="mt-8 flex gap-4">
 
-              {[FaGithub, FaXTwitter, FaLinkedin, FaDiscord].map(
-                (Icon, index) => (
+              {socialLinks.map((social) => {
+                const Icon = social.icon;
 
-                  <button
-                    key={index}
+                return (
+                  <a
+                    key={social.label}
+                    href={social.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={social.label}
                     className="
                       flex
                       h-11
@@ -113,19 +136,15 @@ export default function Footer() {
                     "
                   >
                     <Icon size={18} />
-                  </button>
-
-                )
-              )}
+                  </a>
+                );
+              })}
 
             </div>
 
           </div>
 
-          {/* ================================================= */}
           {/* PRODUCT */}
-          {/* ================================================= */}
-
           <div>
 
             <h3 className="mb-6 text-lg font-semibold text-white">
@@ -135,47 +154,43 @@ export default function Footer() {
             <ul className="space-y-4">
 
               {productLinks.map((item) => (
+                <li key={item.label}>
 
-                <li
-                  key={item}
-                  className="
-                    group
-                    flex
-                    cursor-pointer
-                    items-center
-                    gap-2
-                    text-slate-400
-                    transition-all
-                    duration-300
-                    hover:translate-x-1
-                    hover:text-cyan-400
-                  "
-                >
-
-                  {item}
-
-                  <ArrowRight
-                    size={14}
+                  <Link
+                    href={item.href}
                     className="
-                      opacity-0
+                      group
+                      flex
+                      items-center
+                      gap-2
+                      text-slate-400
                       transition-all
                       duration-300
-                      group-hover:opacity-100
+                      hover:translate-x-1
+                      hover:text-cyan-400
                     "
-                  />
+                  >
+                    {item.label}
+
+                    <ArrowRight
+                      size={14}
+                      className="
+                        opacity-0
+                        transition-all
+                        duration-300
+                        group-hover:opacity-100
+                      "
+                    />
+                  </Link>
 
                 </li>
-
               ))}
 
             </ul>
 
           </div>
 
-          {/* ================================================= */}
           {/* RESOURCES */}
-          {/* ================================================= */}
-
           <div>
 
             <h3 className="mb-6 text-lg font-semibold text-white">
@@ -185,46 +200,43 @@ export default function Footer() {
             <ul className="space-y-4">
 
               {resourceLinks.map((item) => (
+                <li key={item.label}>
 
-                <li
-                  key={item}
-                  className="
-                    group
-                    flex
-                    cursor-pointer
-                    items-center
-                    gap-2
-                    text-slate-400
-                    transition-all
-                    duration-300
-                    hover:translate-x-1
-                    hover:text-cyan-400
-                  "
-                >
-
-                  {item}
-
-                  <ArrowRight
-                    size={14}
+                  <Link
+                    href={item.href}
                     className="
-                      opacity-0
+                      group
+                      flex
+                      items-center
+                      gap-2
+                      text-slate-400
                       transition-all
                       duration-300
-                      group-hover:opacity-100
+                      hover:translate-x-1
+                      hover:text-cyan-400
                     "
-                  />
+                  >
+                    {item.label}
+
+                    <ArrowRight
+                      size={14}
+                      className="
+                        opacity-0
+                        transition-all
+                        duration-300
+                        group-hover:opacity-100
+                      "
+                    />
+                  </Link>
 
                 </li>
-
               ))}
 
             </ul>
 
           </div>
-                  {/* ================================================= */}
-          {/* COMPANY */}
-          {/* ================================================= */}
 
+          {/* COMPANY */}
           <div>
 
             <h3 className="mb-6 text-lg font-semibold text-white">
@@ -234,47 +246,43 @@ export default function Footer() {
             <ul className="space-y-4">
 
               {companyLinks.map((item) => (
+                <li key={item.label}>
 
-                <li
-                  key={item}
-                  className="
-                    group
-                    flex
-                    cursor-pointer
-                    items-center
-                    gap-2
-                    text-slate-400
-                    transition-all
-                    duration-300
-                    hover:translate-x-1
-                    hover:text-cyan-400
-                  "
-                >
-
-                  {item}
-
-                  <ArrowRight
-                    size={14}
+                  <Link
+                    href={item.href}
                     className="
-                      opacity-0
+                      group
+                      flex
+                      items-center
+                      gap-2
+                      text-slate-400
                       transition-all
                       duration-300
-                      group-hover:opacity-100
+                      hover:translate-x-1
+                      hover:text-cyan-400
                     "
-                  />
+                  >
+                    {item.label}
+
+                    <ArrowRight
+                      size={14}
+                      className="
+                        opacity-0
+                        transition-all
+                        duration-300
+                        group-hover:opacity-100
+                      "
+                    />
+                  </Link>
 
                 </li>
-
               ))}
 
             </ul>
 
           </div>
 
-          {/* ================================================= */}
           {/* LEGAL */}
-          {/* ================================================= */}
-
           <div>
 
             <h3 className="mb-6 text-lg font-semibold text-white">
@@ -284,37 +292,36 @@ export default function Footer() {
             <ul className="space-y-4">
 
               {legalLinks.map((item) => (
+                <li key={item.label}>
 
-                <li
-                  key={item}
-                  className="
-                    group
-                    flex
-                    cursor-pointer
-                    items-center
-                    gap-2
-                    text-slate-400
-                    transition-all
-                    duration-300
-                    hover:translate-x-1
-                    hover:text-cyan-400
-                  "
-                >
-
-                  {item}
-
-                  <ArrowRight
-                    size={14}
+                  <Link
+                    href={item.href}
                     className="
-                      opacity-0
+                      group
+                      flex
+                      items-center
+                      gap-2
+                      text-slate-400
                       transition-all
                       duration-300
-                      group-hover:opacity-100
+                      hover:translate-x-1
+                      hover:text-cyan-400
                     "
-                  />
+                  >
+                    {item.label}
+
+                    <ArrowRight
+                      size={14}
+                      className="
+                        opacity-0
+                        transition-all
+                        duration-300
+                        group-hover:opacity-100
+                      "
+                    />
+                  </Link>
 
                 </li>
-
               ))}
 
             </ul>
@@ -323,20 +330,13 @@ export default function Footer() {
 
         </div>
 
-        {/* ================================================= */}
         {/* DIVIDER */}
-        {/* ================================================= */}
-
         <div className="my-14 border-t border-white/10" />
 
-        {/* ================================================= */}
         {/* BOTTOM */}
-        {/* ================================================= */}
-
         <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
 
           {/* Left */}
-
           <div>
 
             <p className="text-slate-300">
@@ -354,14 +354,12 @@ export default function Footer() {
           </div>
 
           {/* Right */}
-
           <div className="flex flex-wrap items-center gap-4">
 
             {/* Status */}
-
             <div className="flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-4 py-2">
 
-              <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <div className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
 
               <span className="text-sm text-emerald-400">
                 All Systems Operational
@@ -370,7 +368,6 @@ export default function Footer() {
             </div>
 
             {/* Version */}
-
             <div
               className="
                 rounded-full
@@ -391,9 +388,9 @@ export default function Footer() {
               v1.0.0
             </div>
 
-            {/* Launch */}
-
-            <button
+            {/* Launch App */}
+            <Link
+              href="/dashboard"
               className="
                 rounded-full
                 border
@@ -410,23 +407,19 @@ export default function Footer() {
                 hover:shadow-[0_0_30px_rgba(34,211,238,.35)]
               "
             >
-
               Launch App
 
               <ArrowUpRight
                 size={16}
                 className="ml-2 inline"
               />
-
-            </button>
+            </Link>
 
           </div>
 
         </div>
 
       </div>
-
     </footer>
-
   );
 }

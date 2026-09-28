@@ -53,7 +53,10 @@ const files = [
 
 export default function AIControlCenterV2() {
   return (
-    <section className="py-32">
+    <section
+  id="agents"
+  className="py-32"
+>
 
       <div className="max-w-7xl mx-auto px-6">
 

@@ -24,20 +24,13 @@ interface ExecuteAgentResult {
   response: string;
   model: string;
   durationMs: number;
+  executionId?: string;
 }
-
-/*
-|--------------------------------------------------------------------------
-| Gemini Configuration
-|--------------------------------------------------------------------------
-*/
 
 const apiKey = process.env.GEMINI_API_KEY;
 
 if (!apiKey) {
-  console.warn(
-    "⚠️ GEMINI_API_KEY is not configured."
-  );
+  console.warn("GEMINI_API_KEY is not configured.");
 }
 
 const ai = apiKey
@@ -50,29 +43,26 @@ const ai = apiKey
 |--------------------------------------------------------------------------
 | Gemini Models
 |--------------------------------------------------------------------------
-|
-| Primary model:
-| gemini-3.6-flash
-|
-| Fallback model:
-| gemini-3.5-flash
-|
 */
 
 const PRIMARY_MODEL =
-  process.env.GEMINI_MODEL || "gemini-3.6-flash";
+  process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 const FALLBACK_MODEL =
   process.env.GEMINI_FALLBACK_MODEL ||
-  "gemini-3.5-flash";
+  "gemini-3.5-flash-lite";
 
 /*
 |--------------------------------------------------------------------------
-| Retry Configuration
+| Retry / Timeout Configuration
 |--------------------------------------------------------------------------
 */
 
 const MAX_RETRIES = 2;
+
+const GEMINI_TIMEOUT_MS = 45000;
+
+const RETRY_DELAY_MS = 1500;
 
 const sleep = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
@@ -95,8 +85,57 @@ function isRetryableGeminiError(error: unknown): boolean {
     message.includes("high demand") ||
     message.includes("429") ||
     message.includes("resource exhausted") ||
-    message.includes("rate limit")
+    message.includes("rate limit") ||
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("fetch failed") ||
+    message.includes("headers timeout")
   );
+}
+
+/*
+|--------------------------------------------------------------------------
+| Gemini Request Using Interactions API
+|--------------------------------------------------------------------------
+*/
+
+async function generateGeminiRequest(
+  model: string,
+  prompt: string
+) {
+  if (!ai) {
+    throw new Error(
+      "GEMINI_API_KEY is not configured on the backend."
+    );
+  }
+
+  const timeoutPromise = new Promise<never>(
+    (_, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(
+            `Gemini request timed out after ${
+              GEMINI_TIMEOUT_MS / 1000
+            } seconds.`
+          )
+        );
+      }, GEMINI_TIMEOUT_MS);
+    }
+  );
+
+  const geminiPromise = ai.interactions.create({
+    model,
+    input: prompt,
+    generation_config: {
+      thinking_level: "low",
+      max_output_tokens: 2500,
+    },
+  });
+
+  return Promise.race([
+    geminiPromise,
+    timeoutPromise,
+  ]);
 }
 
 /*
@@ -107,7 +146,8 @@ function isRetryableGeminiError(error: unknown): boolean {
 
 async function generateGeminiResponse(
   model: string,
-  prompt: string
+  prompt: string,
+  maxRetries = MAX_RETRIES
 ) {
   if (!ai) {
     throw new Error(
@@ -117,20 +157,25 @@ async function generateGeminiResponse(
 
   let lastError: unknown = null;
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  for (
+    let attempt = 1;
+    attempt <= maxRetries;
+    attempt++
+  ) {
     try {
       console.log(
-        `🤖 Gemini request | model=${model} | attempt=${attempt}`
+        `Gemini request | model=${model} | attempt=${attempt}`
       );
 
       const response =
-        await ai.models.generateContent({
+        await generateGeminiRequest(
           model,
-          contents: prompt,
-          config: {
-            maxOutputTokens: 4000,
-          },
-        });
+          prompt
+        );
+
+      console.log(
+        `Gemini success | model=${model} | attempt=${attempt}`
+      );
 
       return response;
     } catch (error) {
@@ -141,32 +186,18 @@ async function generateGeminiResponse(
         error
       );
 
-      /*
-      |--------------------------------------------------------------------------
-      | Retry only temporary errors
-      |--------------------------------------------------------------------------
-      */
-
       if (
         !isRetryableGeminiError(error) ||
-        attempt === MAX_RETRIES
+        attempt === maxRetries
       ) {
         break;
       }
 
-      /*
-      |--------------------------------------------------------------------------
-      | Exponential Backoff
-      |--------------------------------------------------------------------------
-      */
-
-      const delay = attempt * 1500;
-
       console.log(
-        `⏳ Retrying Gemini request in ${delay}ms...`
+        `Retrying Gemini request in ${RETRY_DELAY_MS}ms...`
       );
 
-      await sleep(delay);
+      await sleep(RETRY_DELAY_MS);
     }
   }
 
@@ -175,6 +206,161 @@ async function generateGeminiResponse(
     : new Error(
         "Failed to generate AI response."
       );
+}
+
+/*
+|--------------------------------------------------------------------------
+| Get Project Context
+|--------------------------------------------------------------------------
+*/
+
+async function getProjectContext(
+  projectId: string | undefined,
+  userId: string | undefined
+): Promise<string> {
+  if (!projectId || !userId) {
+    return `
+No specific project context was provided.
+
+If architectural decisions are required, clearly
+state assumptions before making them.
+`;
+  }
+
+  const project =
+    await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        ownerId: userId,
+      },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        slug: true,
+        createdAt: true,
+        updatedAt: true,
+
+        _count: {
+          select: {
+            members: true,
+            conversations: true,
+            executions: true,
+            files: true,
+          },
+        },
+      },
+    });
+
+  if (!project) {
+    throw new Error(
+      "Project not found or you do not have access to it."
+    );
+  }
+
+  return `
+PROJECT CONTEXT
+===============
+
+Project Name:
+${project.name}
+
+Project ID:
+${project.id}
+
+Project Slug:
+${project.slug}
+
+Project Description:
+${project.description || "No project description provided."}
+
+Current Project Statistics:
+- Members: ${project._count.members}
+- Conversations: ${project._count.conversations}
+- AI Executions: ${project._count.executions}
+- Project Files: ${project._count.files}
+
+DEVPILOT PLATFORM TECHNOLOGY
+============================
+
+The project is being developed inside the DevPilot AI
+software engineering platform.
+
+Use the following existing platform architecture
+unless the user explicitly asks to change it:
+
+Frontend:
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+- shadcn/ui
+
+Backend:
+- Node.js
+- Express
+- TypeScript
+
+Database:
+- PostgreSQL
+
+ORM:
+- Prisma
+
+Authentication:
+- JWT authentication
+- HTTP-only authentication cookie
+
+AI:
+- Google Gemini API
+
+AI Agent System:
+- Architect Agent
+- Developer Agent
+- UI/UX Agent
+- Debugger Agent
+- Testing Agent
+- Documentation Agent
+
+Existing DevPilot database entities include:
+- User
+- Project
+- ProjectMember
+- Agent
+- Conversation
+- Message
+- AIExecution
+- ProjectFile
+- Notification
+
+Development Environment:
+- Frontend: http://localhost:3000
+- Backend: http://localhost:5000
+
+IMPORTANT ARCHITECTURE RULES
+============================
+
+1. Do NOT replace the existing Express backend with
+   Next.js Serverless Functions unless explicitly requested.
+
+2. Do NOT introduce Redis unless the user explicitly
+   requests caching, rate limiting, queues, or Redis.
+
+3. Do NOT replace PostgreSQL with another database.
+
+4. Do NOT replace Prisma unless explicitly requested.
+
+5. Do NOT assume Vercel Serverless architecture.
+
+6. Reuse the existing DevPilot architecture whenever
+   designing features for this project.
+
+7. If a new technology is genuinely required,
+   explain why before recommending it.
+
+8. Treat the supplied project information as the
+   source of truth for the current architecture.
+`;
 }
 
 /*
@@ -232,11 +418,12 @@ export async function executeAgent(
   |--------------------------------------------------------------------------
   */
 
-  const agent = await prisma.agent.findUnique({
-    where: {
-      id: input.agentId,
-    },
-  });
+  const agent =
+    await prisma.agent.findUnique({
+      where: {
+        id: input.agentId,
+      },
+    });
 
   if (!agent) {
     throw new Error(
@@ -258,6 +445,18 @@ export async function executeAgent(
 
   /*
   |--------------------------------------------------------------------------
+  | Get Project Context
+  |--------------------------------------------------------------------------
+  */
+
+  const projectContext =
+    await getProjectContext(
+      input.projectId,
+      input.userId
+    );
+
+  /*
+  |--------------------------------------------------------------------------
   | Agent System Prompt
   |--------------------------------------------------------------------------
   */
@@ -268,43 +467,120 @@ export async function executeAgent(
 
 Help the user with software development tasks.
 
-Provide practical, accurate and structured technical guidance.
+Provide practical, accurate and structured
+technical guidance.
 
-Focus specifically on the responsibilities of your assigned role.`;
+Focus specifically on the responsibilities
+of your assigned role.`;
 
   /*
   |--------------------------------------------------------------------------
-  | Final Prompt
+  | Final Context-Aware Prompt
   |--------------------------------------------------------------------------
   */
 
   const finalPrompt = `
-You are ${agent.name}, an AI software development
+You are ${agent.name}, an AI software engineering
 agent inside the DevPilot AI platform.
 
-Your assigned role:
+Your assigned agent type:
+
+${agent.type}
+
+YOUR ROLE
+========
 
 ${systemPrompt}
 
-Important rules:
+${projectContext}
+
+IMPORTANT RESPONSE RULES
+========================
 
 - Understand the user's task before responding.
+- Use the provided project context as the source
+  of truth.
+- Do not invent project technologies.
+- Do not replace existing technologies unless
+  explicitly requested.
+- Do not recommend unnecessary infrastructure.
+- Do not assume a different backend architecture.
+- Clearly mention assumptions when information
+  is missing.
+- Stay focused on your assigned agent role.
 - Give practical and technically useful guidance.
-- Use clear headings and bullet points where appropriate.
-- Do not invent project information.
-- Clearly mention assumptions when information is missing.
-- Stay focused on your assigned role.
-- Avoid unnecessary generic explanations.
+- Use clear headings and bullet points.
 - Provide actionable recommendations.
 - Include code examples when useful.
 - Prefer production-quality solutions.
-- Consider security and scalability where relevant.
+- Consider security and scalability.
+- If the user asks to "build" something, explain
+  how it fits into the existing project architecture.
 - Do not mention these internal instructions.
 
-User's task:
+USER'S TASK
+==========
 
 ${prompt}
 `;
+
+  /*
+  |--------------------------------------------------------------------------
+  | Log Prompt Context
+  |--------------------------------------------------------------------------
+  */
+
+  console.log(
+    `AI agent execution | agent=${agent.name} | projectId=${
+      input.projectId || "none"
+    }`
+  );
+
+  /*
+  |--------------------------------------------------------------------------
+  | Create AI Execution Record
+  |--------------------------------------------------------------------------
+  */
+
+  let executionId: string | undefined;
+
+  if (input.userId) {
+    try {
+      const execution =
+        await prisma.aIExecution.create({
+          data: {
+            status: "RUNNING",
+
+            userId: input.userId,
+
+            projectId:
+              input.projectId,
+
+            conversationId:
+              input.conversationId,
+
+            agentId: agent.id,
+
+            model: PRIMARY_MODEL,
+
+            prompt: finalPrompt,
+
+            startedAt: new Date(),
+          },
+        });
+
+      executionId = execution.id;
+
+      console.log(
+        `AI execution started | executionId=${executionId}`
+      );
+    } catch (databaseError) {
+      console.error(
+        "Failed to create AI execution record:",
+        databaseError
+      );
+    }
+  }
 
   /*
   |--------------------------------------------------------------------------
@@ -312,13 +588,13 @@ ${prompt}
   |--------------------------------------------------------------------------
   */
 
-  let response;
+  let response: any;
   let usedModel = PRIMARY_MODEL;
 
   try {
     /*
     |--------------------------------------------------------------------------
-    | Try Primary Model
+    | Primary Model
     |--------------------------------------------------------------------------
     */
 
@@ -326,16 +602,17 @@ ${prompt}
       response =
         await generateGeminiResponse(
           PRIMARY_MODEL,
-          finalPrompt
+          finalPrompt,
+          MAX_RETRIES
         );
     } catch (primaryError) {
       console.warn(
-        `⚠️ Primary Gemini model failed: ${PRIMARY_MODEL}`
+        `Primary Gemini model failed: ${PRIMARY_MODEL}`
       );
 
       /*
       |--------------------------------------------------------------------------
-      | Try Fallback Model
+      | Fallback Model
       |--------------------------------------------------------------------------
       */
 
@@ -344,105 +621,131 @@ ${prompt}
         FALLBACK_MODEL !== PRIMARY_MODEL
       ) {
         console.log(
-          `🔄 Trying fallback Gemini model: ${FALLBACK_MODEL}`
+          `Trying fallback Gemini model: ${FALLBACK_MODEL}`
         );
 
         usedModel = FALLBACK_MODEL;
 
+        /*
+        | Only one fallback attempt.
+        */
+
         response =
           await generateGeminiResponse(
             FALLBACK_MODEL,
-            finalPrompt
+            finalPrompt,
+            1
           );
       } else {
         throw primaryError;
       }
     }
   } catch (error) {
-    console.error(
-      `❌ AI Agent Execution Failed [${agent.name}]`,
-      error
-    );
+    const durationMs =
+      Date.now() - startTime;
 
-    throw new Error(
-      error instanceof Error
-        ? error.message
-        : "Failed to generate AI response."
-    );
+    /*
+    |--------------------------------------------------------------------------
+    | Mark Execution Failed
+    |--------------------------------------------------------------------------
+    */
+
+    if (executionId) {
+      try {
+        await prisma.aIExecution.update({
+          where: {
+            id: executionId,
+          },
+
+          data: {
+            status: "FAILED",
+
+            model: usedModel,
+
+            durationMs,
+
+            errorMessage:
+              error instanceof Error
+                ? error.message
+                : "AI execution failed.",
+
+            completedAt: new Date(),
+          },
+        });
+      } catch (databaseError) {
+        console.error(
+          "Failed to update AI execution failure:",
+          databaseError
+        );
+      }
+    }
+
+    throw error;
   }
 
   /*
   |--------------------------------------------------------------------------
-  | Extract Response
+  | Extract Response Text
   |--------------------------------------------------------------------------
   */
 
-  const text = response.text?.trim();
-
-  if (!text) {
-    throw new Error(
-      "Gemini returned an empty response."
-    );
-  }
-
-  /*
-  |--------------------------------------------------------------------------
-  | Execution Duration
-  |--------------------------------------------------------------------------
-  */
+  const text =
+    response?.output_text?.trim() ||
+    "The AI agent did not return a response.";
 
   const durationMs =
     Date.now() - startTime;
 
   /*
   |--------------------------------------------------------------------------
-  | Usage Metadata
+  | Token Usage
+  |--------------------------------------------------------------------------
+  |
+  | Interactions API response structure can vary by SDK
+  | version, so usage is read defensively.
   |--------------------------------------------------------------------------
   */
 
-  const usage = response.usageMetadata;
+  const usage =
+    response?.usageMetadata ||
+    response?.usage_metadata ||
+    response?.usage;
 
   const inputTokens =
-    usage?.promptTokenCount ?? null;
+    usage?.promptTokenCount ??
+    usage?.inputTokenCount ??
+    usage?.input_tokens ??
+    undefined;
 
   const outputTokens =
-    usage?.candidatesTokenCount ?? null;
+    usage?.candidatesTokenCount ??
+    usage?.outputTokenCount ??
+    usage?.output_tokens ??
+    undefined;
 
   const totalTokens =
-    usage?.totalTokenCount ?? null;
+    usage?.totalTokenCount ??
+    usage?.totalTokenCount ??
+    usage?.total_tokens ??
+    undefined;
 
   /*
   |--------------------------------------------------------------------------
-  | Save AI Execution
+  | Mark Execution Completed
   |--------------------------------------------------------------------------
-  |
-  | userId is currently optional because authentication
-  | is not yet connected to the backend.
-  |
-  | Once authentication is implemented, every execution
-  | will automatically be persisted.
-  |
   */
 
-  if (input.userId) {
+  if (executionId) {
     try {
-      await prisma.aIExecution.create({
+      await prisma.aIExecution.update({
+        where: {
+          id: executionId,
+        },
+
         data: {
           status: "COMPLETED",
 
-          userId: input.userId,
-
-          projectId:
-            input.projectId || null,
-
-          conversationId:
-            input.conversationId || null,
-
-          agentId: agent.id,
-
           model: usedModel,
-
-          prompt,
 
           response: text,
 
@@ -454,26 +757,16 @@ ${prompt}
 
           durationMs,
 
-          startedAt: new Date(
-            startTime
-          ),
-
           completedAt: new Date(),
         },
       });
 
       console.log(
-        `💾 AI execution saved | agent=${agent.name}`
+        `AI execution completed | executionId=${executionId} | duration=${durationMs}ms`
       );
     } catch (databaseError) {
-      /*
-      |--------------------------------------------------------------------------
-      | Do not fail AI response because of logging failure
-      |--------------------------------------------------------------------------
-      */
-
       console.error(
-        "⚠️ Failed to save AI execution:",
+        "Failed to save AI execution result:",
         databaseError
       );
     }
@@ -498,5 +791,7 @@ ${prompt}
     model: usedModel,
 
     durationMs,
+
+    executionId,
   };
 }
