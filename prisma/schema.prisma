@@ -1,0 +1,11 @@
+model Student {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  age       Int
+  course    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("students")
+}
