@@ -117,17 +117,19 @@ model Project {
   description String?
   slug        String  @unique
   ownerId     String
-  owner       User    @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  owner User @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
 
   archived Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members       ProjectMember[]
-  conversations Conversation[]
-  files         ProjectFile[]
-  executions    AIExecution[]
+  members          ProjectMember[]
+  conversations    Conversation[]
+  files            ProjectFile[]
+  executions       AIExecution[]
+  githubConnection GitHubConnection?
 
   @@index([ownerId])
   @@index([createdAt])
@@ -303,6 +305,26 @@ model ProjectFile {
   @@unique([projectId, path])
   @@index([projectId])
   @@index([parentPath])
+}
+
+// ============================================================
+// GITHUB CONNECTION
+// ============================================================
+
+model GitHubConnection {
+  id String @id @default(uuid())
+
+  projectId String @unique
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  repositoryUrl  String
+  repositoryName String
+  ownerName      String
+  branch         String @default("main")
+
+  connectedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // ============================================================

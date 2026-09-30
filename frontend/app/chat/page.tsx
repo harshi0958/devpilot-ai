@@ -21,6 +21,13 @@ type Agent = {
   isActive: boolean;
 };
 
+type Project = {
+  id: string;
+  name: string;
+  description?: string | null;
+  slug?: string;
+};
+
 type Message = {
   id: string;
   role: "user" | "assistant";
@@ -43,10 +50,17 @@ export default function AIChatPage() {
   const [selectedAgent, setSelectedAgent] =
     useState<Agent | null>(null);
 
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedProject, setSelectedProject] =
+    useState<Project | null>(null);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
 
   const [loadingAgents, setLoadingAgents] =
+    useState(true);
+
+  const [loadingProjects, setLoadingProjects] =
     useState(true);
 
   const [sending, setSending] = useState(false);
@@ -110,6 +124,63 @@ export default function AIChatPage() {
   }, []);
 
   // ==========================================================
+  // LOAD PROJECTS
+  // ==========================================================
+
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        setLoadingProjects(true);
+
+        const response = await fetch(
+          `${API_URL}/api/projects`,
+          {
+            credentials: "include",
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            data?.message ||
+              "Failed to load projects."
+          );
+        }
+
+        const loadedProjects: Project[] =
+          data?.data ||
+          data?.projects ||
+          [];
+
+        setProjects(loadedProjects);
+
+        // Select first project by default
+        if (loadedProjects.length > 0) {
+          setSelectedProject(
+            loadedProjects[0]
+          );
+        }
+      } catch (err) {
+        console.error(
+          "Load projects error:",
+          err
+        );
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to load projects."
+        );
+      } finally {
+        setLoadingProjects(false);
+      }
+    };
+
+    loadProjects();
+  }, []);
+
+  // ==========================================================
   // SEND MESSAGE
   // ==========================================================
 
@@ -119,6 +190,7 @@ export default function AIChatPage() {
     if (
       !message ||
       !selectedAgent ||
+      !selectedProject ||
       sending
     ) {
       return;
@@ -154,6 +226,7 @@ export default function AIChatPage() {
 
           body: JSON.stringify({
             prompt: message,
+            projectId: selectedProject.id,
           }),
         }
       );
@@ -238,7 +311,10 @@ export default function AIChatPage() {
   // LOADING
   // ==========================================================
 
-  if (loadingAgents) {
+  if (
+    loadingAgents ||
+    loadingProjects
+  ) {
     return (
       <div className="flex min-h-screen bg-[#070B14]">
         <Sidebar />
@@ -269,6 +345,7 @@ export default function AIChatPage() {
         <TopNavbar />
 
         <main className="flex min-h-0 flex-1 flex-col p-6 lg:p-8">
+
           {/* ================================================= */}
           {/* HEADER */}
           {/* ================================================= */}
@@ -315,11 +392,88 @@ export default function AIChatPage() {
           {/* ================================================= */}
 
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/10 bg-white/3">
+
             {/* ================================================= */}
-            {/* AGENT SELECTOR */}
+            {/* PROJECT + AGENT SELECTOR */}
             {/* ================================================= */}
 
             <div className="border-b border-white/10 p-4">
+
+              {/* PROJECT SELECTOR */}
+              <div className="mb-5">
+                <div className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300">
+                  <span className="text-cyan-400">
+                    📁
+                  </span>
+
+                  Select Project
+                </div>
+
+                <select
+                  value={
+                    selectedProject?.id || ""
+                  }
+                  onChange={(event) => {
+                    const project =
+                      projects.find(
+                        (item) =>
+                          item.id ===
+                          event.target.value
+                      ) || null;
+
+                    if (!sending) {
+                      setSelectedProject(
+                        project
+                      );
+
+                      setMessages([]);
+                      setError("");
+                    }
+                  }}
+                  disabled={
+                    sending ||
+                    loadingProjects ||
+                    projects.length === 0
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-500/40 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {projects.length === 0 ? (
+                    <option value="">
+                      No projects available
+                    </option>
+                  ) : (
+                    <>
+                      <option value="">
+                        Select a project...
+                      </option>
+
+                      {projects.map(
+                        (project) => (
+                          <option
+                            key={project.id}
+                            value={project.id}
+                          >
+                            {project.name}
+                          </option>
+                        )
+                      )}
+                    </>
+                  )}
+                </select>
+
+                {selectedProject && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    AI responses will use the
+                    architecture and context of{" "}
+                    <span className="text-cyan-400">
+                      {selectedProject.name}
+                    </span>
+                  </p>
+                )}
+              </div>
+
+              {/* AI AGENT SELECTOR */}
+
               <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-300">
                 <Bot
                   size={17}
@@ -392,14 +546,24 @@ export default function AIChatPage() {
                   </h2>
 
                   <p className="mt-2 max-w-md text-sm leading-6 text-slate-400">
-                    Ask your selected AI agent about
-                    architecture, development,
-                    debugging, testing, UI/UX or
+                    Ask your selected AI agent
+                    about architecture,
+                    development, debugging,
+                    testing, UI/UX or
                     documentation.
                   </p>
 
+                  {selectedProject && (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
+                      Current project:{" "}
+                      <span className="font-medium text-cyan-300">
+                        {selectedProject.name}
+                      </span>
+                    </div>
+                  )}
+
                   {selectedAgent && (
-                    <div className="mt-5 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
+                    <div className="mt-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-400">
                       Current agent:{" "}
                       <span className="font-medium text-cyan-300">
                         {selectedAgent.name}
@@ -505,12 +669,15 @@ export default function AIChatPage() {
                   onKeyDown={handleKeyDown}
                   disabled={
                     sending ||
-                    !selectedAgent
+                    !selectedAgent ||
+                    !selectedProject
                   }
                   placeholder={
-                    selectedAgent
-                      ? `Ask ${selectedAgent.name}...`
-                      : "Select an AI agent..."
+                    !selectedProject
+                      ? "Select a project first..."
+                      : selectedAgent
+                        ? `Ask ${selectedAgent.name}...`
+                        : "Select an AI agent..."
                   }
                   rows={2}
                   className="min-h-12 flex-1 resize-none bg-transparent px-3 py-2.5 text-sm text-white outline-none placeholder:text-slate-600 disabled:cursor-not-allowed"
@@ -522,7 +689,8 @@ export default function AIChatPage() {
                   disabled={
                     sending ||
                     !input.trim() ||
-                    !selectedAgent
+                    !selectedAgent ||
+                    !selectedProject
                   }
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-500 text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -538,8 +706,8 @@ export default function AIChatPage() {
               </div>
 
               <p className="mt-2 text-center text-xs text-slate-600">
-                Press Enter to send • Shift + Enter
-                for a new line
+                Press Enter to send • Shift +
+                Enter for a new line
               </p>
             </div>
           </div>
