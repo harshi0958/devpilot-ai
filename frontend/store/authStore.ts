@@ -46,17 +46,19 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true });
 
     try {
+      const body = new URLSearchParams();
+
+      body.append("name", name);
+      body.append("email", email);
+      body.append("password", password);
+
       const response = await fetch(`${API_URL}/api/auth/register`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
         },
         credentials: "include",
-        body: JSON.stringify({
-          name,
-          email,
-          password,
-        }),
+        body: body.toString(),
       });
 
       const data = await response.json();
@@ -95,16 +97,18 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ loading: true });
 
     try {
+      const body = new URLSearchParams();
+
+      body.append("email", email);
+      body.append("password", password);
+
       const response = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type": "application/x-www-form-urlencoded",
         },
         credentials: "include",
-        body: JSON.stringify({
-          email,
-          password,
-        }),
+        body: body.toString(),
       });
 
       const data = await response.json();
