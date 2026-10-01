@@ -23,18 +23,23 @@ const app = express();
 
 app.use(helmet());
 
-/*
-|--------------------------------------------------------------------------
-| CORS
-|--------------------------------------------------------------------------
-*/
+const allowedOrigin =
+  process.env.FRONTEND_URL || "http://localhost:3000";
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: allowedOrigin,
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    optionsSuccessStatus: 204,
   })
 );
+
+app.options("*", cors({
+  origin: allowedOrigin,
+  credentials: true,
+}));
 
 app.use(cookieParser());
 
