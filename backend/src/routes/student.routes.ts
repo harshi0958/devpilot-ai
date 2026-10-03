@@ -1,20 +1,14 @@
 import { Router } from 'express';
-import {
-  getStudents,
-  createStudent,
-  updateStudent,
-  deleteStudent,
-} from '../controllers/student.controller';
-// Assuming you have an authentication middleware protecting routes
-// import { authenticateJWT } from '../middlewares/auth.middleware';
+import { studentController } from '../controllers/student.controller';
+import { validateBody } from '../middlewares/validate.middleware';
+import { createStudentSchema, updateStudentSchema } from '../validations/student.validation';
 
 const router = Router();
 
-// router.use(authenticateJWT);
-
-router.get('/', getStudents);
-router.post('/', createStudent);
-router.put('/:id', updateStudent);
-router.delete('/:id', deleteStudent);
+router.get('/', studentController.getAll);
+router.get('/:id', studentController.getById);
+router.post('/', validateBody(createStudentSchema), studentController.create);
+router.put('/:id', validateBody(updateStudentSchema), studentController.update);
+router.delete('/:id', studentController.delete);
 
 export default router;
