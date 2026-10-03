@@ -1,69 +1,77 @@
-import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Request, Response, NextFunction } from 'express';
+import { studentService } from '../services/student.service';
 
-const prisma = new PrismaClient() as any;
-
-export const getStudents = async (req: Request, res: Response) => {
-  try {
-    const { projectId } = req.query;
-    if (!projectId || typeof projectId !== 'string') {
-      return res.status(400).json({ error: 'Project ID is required' });
+export class StudentController {
+  async getAll(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const students = await studentService.getAllStudents();
+      res.status(200).json({
+        success: true,
+        data: students,
+      });
+    } catch (error) {
+      next(error);
     }
-
-    const students = await prisma.student.findMany({
-      where: { projectId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return res.json(students);
-  } catch (error) {
-    return res.status(500).json({ error: 'Failed to fetch students' });
   }
-};
 
-export const createStudent = async (req: Request, res: Response) => {
-  try {
-    const { name, email, age, course, projectId } = req.body;
+  async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const student = await studentService.getStudentById(id);
 
-    if (!name || !email || !age || !course || !projectId) {
-      return res.status(400).json({ error: 'All fields are required' });
+      if (!student) {
+        res.status(404).json({
+          success: false,
+          message: 'Student not found',
+        });
+        return;
+      }
+
+      res.status(200).json({
+        success: true,
+        data: student,
+      });
+    } catch (error) {
+      next(error);
     }
+  }
 
-    const student = await prisma.student.create({
-      data: { name, email, age: Number(age), course, projectId },
-    });
-
-    return res.status(201).json(student);
-  } catch (error: any) {
-    if (error.code === 'P2002') {
-      return res.status(400).json({ error: 'Student with this email already exists' });
+  async create(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const student = await studentService.createStudent(req.body);
+      res.status(201).json({
+        success: true,
+        data: student,
+        message: 'Student created successfully',
+      });
+    } catch (error) {
+      next(error);
     }
-    return res.status(500).json({ error: 'Failed to create student' });
   }
-};
 
-export const updateStudent = async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { name, email, age, course } = req.body;
-
-    const student = await prisma.student.update({
-      where: { id },
-      data: { name, email, age: age ? Number(age) : undefined, course },
-    });
-
-    return res.json(student);
-  } catch (error) {
-    return res.status(500).json({ error: 'Failed to update student' });
+  async update(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const student = await studentService.updateStudent(id, req.body);
+      res.status(200).json({
+        success: true,
+        data: student,
+        message: 'Student updated successfully',
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-};
 
-export const deleteStudent = async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    await prisma.student.delete({ where: { id } });
-    return res.status(204).send();
-  } catch (error) {
-    return res.status(500).json({ error: 'Failed to delete student' });
+  async delete(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      await studentService.deleteStudent(id);
+      res.status(204).send();
+    } catch (error) {
+      next(error);
+    }
   }
-};
+}
+
+export const studentController = new StudentController();
