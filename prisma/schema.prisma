@@ -1,11 +1,32 @@
-model Student {
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
   id        String   @id @default(uuid())
-  name      String
   email     String   @unique
-  age       Int
-  course    String
+  password  String
+  name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
 
-  @@map("students")
+model Student {
+  id           String   @id @default(uuid())
+  enrollmentId String   @unique
+  firstName    String
+  lastName     String
+  email        String   @unique
+  department   String
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+  @@index([enrollmentId])
 }
