@@ -7,346 +7,133 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ============================================================
-// ENUMS
-// ============================================================
-
-enum UserRole {
-  USER
-  ADMIN
-}
-
-enum UserPlan {
-  FREE
-  PRO
-  ENTERPRISE
-}
-
-enum ProjectRole {
-  OWNER
-  ADMIN
-  MEMBER
-  VIEWER
-}
-
-enum AgentType {
-  ARCHITECT
-  DEVELOPER
-  UIUX
-  DEBUGGER
-  TESTING
-  DOCUMENTATION
-}
-
-enum ConversationStatus {
-  ACTIVE
-  ARCHIVED
-  DELETED
-}
-
-enum MessageRole {
-  USER
-  ASSISTANT
-  SYSTEM
-}
-
-enum ExecutionStatus {
-  QUEUED
-  RUNNING
-  COMPLETED
-  FAILED
-  CANCELLED
-}
-
-enum FileType {
-  FILE
-  FOLDER
-}
-
-enum NotificationType {
-  SYSTEM
-  PROJECT
-  AGENT
-  SECURITY
-}
-
-// ============================================================
-// USER
-// ============================================================
-
 model User {
-  id           String   @id @default(uuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         UserRole @default(USER)
-  avatarUrl    String?
-
-  // ==========================================================
-  // SUBSCRIPTION / PLAN
-  // ==========================================================
-
-  plan                   UserPlan  @default(FREE)
-  razorpayCustomerId     String?
-  razorpaySubscriptionId String?
-  planStartedAt          DateTime?
-  planExpiresAt          DateTime?
-
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  projects      Project[]       @relation("ProjectOwner")
-  memberships   ProjectMember[]
-  conversations Conversation[]
-  messages      Message[]
-  executions    AIExecution[]
-  notifications Notification[]
+  projects  ProjectMember[]
 
-  @@index([email])
-  @@index([createdAt])
-  @@index([plan])
+  @@map("users")
 }
-
-// ============================================================
-// PROJECT
-// ============================================================
 
 model Project {
-  id          String  @id @default(uuid())
+  id          String   @id @default(uuid())
   name        String
+  slug        String   @unique
   description String?
-  slug        String  @unique
-  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  owner User @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members      ProjectMember[]
+  conversations Conversation[]
+  files        ProjectFile[]
+  notifications Notification[]
 
-  archived Boolean @default(false)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  members          ProjectMember[]
-  conversations    Conversation[]
-  files            ProjectFile[]
-  executions       AIExecution[]
-  githubConnection GitHubConnection?
-
-  @@index([ownerId])
-  @@index([createdAt])
-  @@index([archived])
+  @@map("projects")
 }
-
-// ============================================================
-// PROJECT MEMBER
-// ============================================================
 
 model ProjectMember {
-  id String @id @default(uuid())
-
-  projectId String
+  id        String   @id @default(uuid())
   userId    String
-  role      ProjectRole @default(MEMBER)
-
+  projectId String
+  role      String   @default("MEMBER")
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@unique([projectId, userId])
-  @@index([projectId])
-  @@index([userId])
+  @@unique([userId, projectId])
+  @@map("project_members")
 }
-
-// ============================================================
-// AGENT
-// ============================================================
 
 model Agent {
-  id           String    @id @default(uuid())
-  type         AgentType
-  name         String
-  description  String?
-  systemPrompt String?
-  isActive     Boolean   @default(true)
+  id          String   @id @default(uuid())
+  name        String
+  type        String
+  description String?
+  createdAt   DateTime @default(now())
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  conversations Conversation[]
-  executions    AIExecution[]
-
-  @@unique([type])
-  @@index([isActive])
+  @@map("agents")
 }
-
-// ============================================================
-// CONVERSATION
-// ============================================================
 
 model Conversation {
-  id String @id @default(uuid())
-
-  title  String
-  status ConversationStatus @default(ACTIVE)
-
-  userId    String
-  projectId String?
-  agentId   String?
-
+  id        String   @id @default(uuid())
+  projectId String
+  title     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  agent   Agent?   @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages  Message[]
 
-  messages   Message[]
-  executions AIExecution[]
-
-  @@index([userId])
-  @@index([projectId])
-  @@index([agentId])
-  @@index([status])
-  @@index([updatedAt])
+  @@map("conversations")
 }
-
-// ============================================================
-// MESSAGE
-// ============================================================
 
 model Message {
-  id String @id @default(uuid())
-
-  role    MessageRole
-  content String
-
-  userId         String?
+  id             String   @id @default(uuid())
   conversationId String
+  senderType     String
+  content        String
+  createdAt      DateTime @default(now())
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId, createdAt])
-  @@index([userId])
+  @@map("messages")
 }
-
-// ============================================================
-// AI EXECUTION
-// ============================================================
 
 model AIExecution {
-  id String @id @default(uuid())
+  id          String   @id @default(uuid())
+  projectId   String?
+  agentType   String
+  prompt      String
+  response    String
+  status      String   @default("SUCCESS")
+  createdAt   DateTime @default(now())
 
-  status ExecutionStatus @default(QUEUED)
-
-  userId         String
-  projectId      String?
-  conversationId String?
-  agentId        String
-
-  model    String
-  prompt   String
-  response String?
-
-  inputTokens  Int?
-  outputTokens Int?
-  totalTokens  Int?
-  durationMs   Int?
-
-  errorMessage String?
-
-  startedAt   DateTime?
-  completedAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project      Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  agent        Agent         @relation(fields: [agentId], references: [id], onDelete: Restrict)
-
-  @@index([userId])
-  @@index([projectId])
-  @@index([conversationId])
-  @@index([agentId])
-  @@index([status])
-  @@index([createdAt])
+  @@map("ai_executions")
 }
-
-// ============================================================
-// PROJECT FILE
-// ============================================================
 
 model ProjectFile {
-  id String @id @default(uuid())
-
+  id        String   @id @default(uuid())
   projectId String
-
-  name String
-  path String
-  type FileType
-
-  mimeType String?
-  size     BigInt?
-  content  String?
-
-  parentPath String?
-
+  path      String
+  content   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, path])
-  @@index([projectId])
-  @@index([parentPath])
+  @@map(
+    "project_files"
+  )
 }
-
-// ============================================================
-// GITHUB CONNECTION
-// ============================================================
-
-model GitHubConnection {
-  id String @id @default(uuid())
-
-  projectId String @unique
-
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  repositoryUrl  String
-  repositoryName String
-  ownerName      String
-  branch         String @default("main")
-
-  connectedAt DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-}
-
-// ============================================================
-// NOTIFICATION
-// ============================================================
 
 model Notification {
-  id String @id @default(uuid())
+  id        String   @id @default(uuid())
+  projectId String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
 
-  userId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  type    NotificationType
-  title   String
-  message String
-  isRead  Boolean          @default(false)
+  @@map("notifications")
+}
 
-  createdAt DateTime  @default(now())
-  readAt    DateTime?
+model Student {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  course    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([userId, isRead])
-  @@index([createdAt])
+  @@index([email])
+  @@map("students")
 }
