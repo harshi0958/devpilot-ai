@@ -5,16 +5,24 @@ import {
   FolderKanban,
   Bot,
   Activity,
-  CheckCircle2,
+  FileCode2,
   TrendingUp,
   Loader2,
 } from "lucide-react";
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 type Stats = {
   projects: number;
   agents: number;
   executions: number;
-  completed: number;
+  files: number;
+};
+
+type DashboardStatsResponse = {
+  success: boolean;
+  stats: Stats;
 };
 
 export default function StatsCards() {
@@ -22,59 +30,63 @@ export default function StatsCards() {
     projects: 0,
     agents: 0,
     executions: 0,
-    completed: 0,
+    files: 0,
   });
 
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchStats = async () => {
+    let cancelled = false;
+
+    const fetchDashboardStats = async () => {
       try {
-        const [projectsResponse, agentsResponse, executionsResponse] =
-          await Promise.all([
-            fetch("http://localhost:5000/api/projects", {
-              credentials: "include",
-            }),
-            fetch("http://localhost:5000/api/agents", {
-              credentials: "include",
-            }),
-            fetch("http://localhost:5000/api/executions", {
-              credentials: "include",
-            }),
-          ]);
+        const response = await fetch(
+          `${API_URL}/api/dashboard/stats`,
+          {
+            method: "GET",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        );
 
-        const projectsData = await projectsResponse.json();
-        const agentsData = await agentsResponse.json();
-        const executionsData = await executionsResponse.json();
+        if (!response.ok) {
+          throw new Error(
+            `Dashboard stats request failed: ${response.status}`
+          );
+        }
 
-        const executions = Array.isArray(executionsData?.data)
-          ? executionsData.data
-          : [];
+        const result: DashboardStatsResponse =
+          await response.json();
 
-        setStats({
-          projects: Array.isArray(projectsData?.projects)
-  ? projectsData.projects.length
-  : 0,
+        if (cancelled) return;
 
-agents: Array.isArray(agentsData?.agents)
-  ? agentsData.agents.length
-  : 0,
-
-          executions: executions.length,
-
-          completed: executions.filter(
-            (execution: { status: string }) =>
-              execution.status === "COMPLETED"
-          ).length,
-        });
+        if (result.success && result.stats) {
+          setStats({
+            projects: result.stats.projects ?? 0,
+            agents: result.stats.agents ?? 0,
+            executions: result.stats.executions ?? 0,
+            files: result.stats.files ?? 0,
+          });
+        }
       } catch (error) {
-        console.error("Failed to load dashboard stats:", error);
+        console.error(
+          "Failed to load dashboard statistics:",
+          error
+        );
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
-    fetchStats();
+    fetchDashboardStats();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const statsCards = [
@@ -100,10 +112,10 @@ agents: Array.isArray(agentsData?.agents)
       color: "text-orange-400",
     },
     {
-      title: "Completed",
-      value: stats.completed,
-      subtitle: "Successful executions",
-      icon: CheckCircle2,
+      title: "Generated Files",
+      value: stats.files,
+      subtitle: "Project files",
+      icon: FileCode2,
       color: "text-emerald-400",
     },
   ];

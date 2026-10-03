@@ -7,133 +7,291 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum UserPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum ProjectRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum AgentType {
+  ARCHITECT
+  DEVELOPER
+  UIUX
+  DEBUGGER
+  TESTING
+  DOCUMENTATION
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum ExecutionStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum FileType {
+  FILE
+  FOLDER
+}
+
+enum NotificationType {
+  SYSTEM
+  PROJECT
+  AGENT
+  SECURITY
+}
+
+enum OTPPurpose {
+  LOGIN
+  PASSWORD_RESET
+}
+
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                     String                  @id @default(uuid())
+  name                   String
+  email                  String                  @unique
+  passwordHash           String
+  role                   UserRole                @default(USER)
+  avatarUrl              String?
+  plan                   UserPlan                @default(FREE)
+  razorpayCustomerId     String?
+  razorpaySubscriptionId String?
+  planStartedAt          DateTime?
+  planExpiresAt          DateTime?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  projects               Project[]               @relation("ProjectOwner")
+  memberships            ProjectMember[]
+  conversations          Conversation[]
+  messages               Message[]
+  executions             AIExecution[]
+  notifications          Notification[]
+  emailVerificationCodes EmailVerificationCode[]
 
-  projects  ProjectMember[]
-
-  @@map("users")
+  @@index([email])
+  @@index([createdAt])
+  @@index([plan])
 }
 
 model Project {
-  id          String   @id @default(uuid())
-  name        String
-  slug        String   @unique
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id               String            @id @default(uuid())
+  name             String
+  description      String?
+  slug             String            @unique
+  ownerId          String
+  owner            User              @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  archived         Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  members          ProjectMember[]
+  conversations    Conversation[]
+  files            ProjectFile[]
+  executions       AIExecution[]
+  githubConnection GitHubConnection?
 
-  members      ProjectMember[]
-  conversations Conversation[]
-  files        ProjectFile[]
-  notifications Notification[]
-
-  @@map("projects")
+  @@index([ownerId])
+  @@index([createdAt])
+  @@index([archived])
 }
 
 model ProjectMember {
-  id        String   @id @default(uuid())
-  userId    String
+  id        String      @id @default(uuid())
   projectId String
-  role      String   @default("MEMBER")
-  createdAt DateTime @default(now())
+  userId    String
+  role      ProjectRole @default(MEMBER)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, projectId])
-  @@map("project_members")
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
 }
 
 model Agent {
-  id          String   @id @default(uuid())
-  name        String
-  type        String
-  description String?
-  createdAt   DateTime @default(now())
+  id            String         @id @default(uuid())
+  type          AgentType
+  name          String
+  description   String?
+  systemPrompt  String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  conversations Conversation[]
+  executions    AIExecution[]
 
-  @@map("agents")
+  @@unique([type])
+  @@index([isActive])
 }
 
 model Conversation {
-  id        String   @id @default(uuid())
-  projectId String
-  title     String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String             @id @default(uuid())
+  title      String
+  status     ConversationStatus @default(ACTIVE)
+  userId     String
+  projectId  String?
+  agentId    String?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project    Project?           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  agent      Agent?             @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  messages   Message[]
+  executions AIExecution[]
 
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  messages  Message[]
-
-  @@map("conversations")
+  @@index([userId])
+  @@index([projectId])
+  @@index([agentId])
+  @@index([status])
+  @@index([updatedAt])
 }
 
 model Message {
-  id             String   @id @default(uuid())
-  conversationId String
-  senderType     String
+  id             String       @id @default(uuid())
+  role           MessageRole
   content        String
-  createdAt      DateTime @default(now())
-
+  userId         String?
+  conversationId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  user           User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
-  @@map("messages")
+  @@index([conversationId, createdAt])
+  @@index([userId])
 }
 
 model AIExecution {
-  id          String   @id @default(uuid())
-  projectId   String?
-  agentType   String
-  prompt      String
-  response    String
-  status      String   @default("SUCCESS")
-  createdAt   DateTime @default(now())
+  id             String          @id @default(uuid())
+  status         ExecutionStatus @default(QUEUED)
+  userId         String
+  projectId      String?
+  conversationId String?
+  agentId        String
+  model          String
+  prompt         String
+  response       String?
+  inputTokens    Int?
+  outputTokens   Int?
+  totalTokens    Int?
+  durationMs     Int?
+  errorMessage   String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project        Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  conversation   Conversation?   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  agent          Agent           @relation(fields: [agentId], references: [id], onDelete: Restrict)
 
-  @@map("ai_executions")
+  @@index([userId])
+  @@index([projectId])
+  @@index([conversationId])
+  @@index([agentId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model ProjectFile {
-  id        String   @id @default(uuid())
-  projectId String
-  path      String
-  content   String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  projectId  String
+  name       String
+  path       String
+  type       FileType
+  mimeType   String?
+  size       BigInt?
+  content    String?
+  parentPath String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@unique([projectId, path])
-  @@map(
-    "project_files"
-  )
+  @@index([projectId])
+  @@index([parentPath])
+}
+
+model GitHubConnection {
+  id             String   @id @default(uuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repositoryUrl  String
+  repositoryName String
+  ownerName      String
+  branch         String   @default("main")
+  connectedAt    DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  projectId String
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
   title     String
   message   String
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  readAt    DateTime?
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
 
-  @@map("notifications")
+model EmailVerificationCode {
+  id        String     @id @default(uuid())
+  userId    String
+  email     String
+  code      String
+  purpose   OTPPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([email])
+  @@index([email, purpose])
+  @@index([expiresAt])
 }
 
 model Student {
   id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  course    String
+  name      String   @db.VarChar(100)
+  email     String   @unique @db.VarChar(255)
+  course    String   @db.VarChar(100)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@index([name])
   @@index([email])
   @@map("students")
 }

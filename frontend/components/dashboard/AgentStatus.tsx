@@ -13,6 +13,9 @@ import {
 
 import AgentCard from "./AgentCard";
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 type BackendAgent = {
   id: string;
   type: string;
@@ -46,15 +49,19 @@ export default function AgentStatus() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchAgents = async () => {
       try {
+        setLoading(true);
+
         const [agentsResponse, executionsResponse] =
           await Promise.all([
-            fetch("http://localhost:5000/api/agents", {
+            fetch(`${API_URL}/api/agents`, {
               method: "GET",
               credentials: "include",
             }),
-            fetch("http://localhost:5000/api/executions", {
+            fetch(`${API_URL}/api/executions`, {
               method: "GET",
               credentials: "include",
             }),
@@ -70,6 +77,8 @@ export default function AgentStatus() {
               "Failed to fetch agents"
           );
         }
+
+        if (cancelled) return;
 
         const backendAgents: BackendAgent[] =
           Array.isArray(agentsData?.agents)
@@ -102,8 +111,6 @@ export default function AgentStatus() {
               return <Boxes size={22} />;
 
             case "DEVELOPER":
-              return <Code2 size={22} />;
-
             case "UIUX":
               return <Code2 size={22} />;
 
@@ -141,11 +148,7 @@ export default function AgentStatus() {
               return "Queued";
 
             case "FAILED":
-              return "Active";
-
             case "COMPLETED":
-              return "Active";
-
             default:
               return "Active";
           }
@@ -167,6 +170,22 @@ export default function AgentStatus() {
           }
         };
 
+        const getProgress = (status: string) => {
+          switch (status) {
+            case "Running":
+              return 50;
+
+            case "Queued":
+              return 25;
+
+            case "Inactive":
+              return 0;
+
+            default:
+              return 100;
+          }
+        };
+
         const dashboardAgents: DashboardAgent[] =
           backendAgents.map((agent) => {
             const latestExecution =
@@ -183,14 +202,7 @@ export default function AgentStatus() {
                 agent.description ||
                 "AI software engineering agent",
               status,
-              progress:
-                status === "Running"
-                  ? 50
-                  : status === "Queued"
-                    ? 25
-                    : status === "Inactive"
-                      ? 0
-                      : 100,
+              progress: getProgress(status),
               color: getColor(status),
               icon: getIcon(agent.type),
             };
@@ -198,18 +210,26 @@ export default function AgentStatus() {
 
         setAgents(dashboardAgents);
       } catch (error) {
-        console.error(
-          "Failed to load agent status:",
-          error
-        );
+        if (!cancelled) {
+          console.error(
+            "Failed to load agent status:",
+            error
+          );
 
-        setAgents([]);
+          setAgents([]);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
     fetchAgents();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -227,7 +247,6 @@ export default function AgentStatus() {
         </div>
       </div>
 
-      {/* Loading */}
       {loading && (
         <div className="flex min-h-45 items-center justify-center rounded-2xl border border-white/10 bg-[#0B1220]">
           <div className="flex items-center gap-3 text-slate-400">
@@ -241,7 +260,6 @@ export default function AgentStatus() {
         </div>
       )}
 
-      {/* Empty */}
       {!loading && agents.length === 0 && (
         <div className="flex min-h-45 items-center justify-center rounded-2xl border border-white/10 bg-[#0B1220]">
           <p className="text-sm text-slate-500">
@@ -250,7 +268,6 @@ export default function AgentStatus() {
         </div>
       )}
 
-      {/* Agents */}
       {!loading && agents.length > 0 && (
         <div className="grid gap-6 lg:grid-cols-2">
           {agents.map((agent) => (

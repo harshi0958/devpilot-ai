@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import ActivityItem from "./ActivityItem";
 import { Loader2 } from "lucide-react";
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 type Execution = {
   id: string;
   status: string;
@@ -32,8 +35,10 @@ export default function ActivityTimeline() {
   useEffect(() => {
     const fetchExecutions = async () => {
       try {
+        setLoading(true);
+
         const response = await fetch(
-          "http://localhost:5000/api/executions",
+          `${API_URL}/api/executions`,
           {
             method: "GET",
             credentials: "include",
@@ -42,17 +47,27 @@ export default function ActivityTimeline() {
 
         const data = await response.json();
 
-        if (!response.ok) {
+        if (!response.ok || !data?.success) {
           throw new Error(
             data?.message || "Failed to fetch activities"
           );
         }
 
-        const executionList = Array.isArray(data?.data)
-          ? data.data
-          : [];
+        const executionList: Execution[] =
+          Array.isArray(data?.data)
+            ? data.data
+            : [];
 
-        setExecutions(executionList.slice(0, 5));
+        // Always show the most recent executions first.
+        const sortedExecutions = [...executionList]
+          .sort(
+            (a, b) =>
+              new Date(b.createdAt).getTime() -
+              new Date(a.createdAt).getTime()
+          )
+          .slice(0, 5);
+
+        setExecutions(sortedExecutions);
       } catch (error) {
         console.error(
           "Failed to load activity timeline:",
@@ -79,6 +94,9 @@ export default function ActivityTimeline() {
       case "RUNNING":
         return "bg-yellow-400";
 
+      case "QUEUED":
+        return "bg-violet-400";
+
       default:
         return "bg-cyan-400";
     }
@@ -86,11 +104,14 @@ export default function ActivityTimeline() {
 
   const getRelativeTime = (date: string) => {
     const createdAt = new Date(date).getTime();
-    const now = Date.now();
+
+    if (Number.isNaN(createdAt)) {
+      return "Unknown time";
+    }
 
     const difference = Math.max(
       0,
-      now - createdAt
+      Date.now() - createdAt
     );
 
     const seconds = Math.floor(difference / 1000);
@@ -114,9 +135,13 @@ export default function ActivityTimeline() {
   };
 
   const getPromptSummary = (prompt: string) => {
-    const cleanPrompt = prompt
+    const cleanPrompt = (prompt || "")
       .replace(/\s+/g, " ")
       .trim();
+
+    if (!cleanPrompt) {
+      return "AI execution completed";
+    }
 
     if (cleanPrompt.length <= 70) {
       return cleanPrompt;
@@ -175,12 +200,16 @@ export default function ActivityTimeline() {
                   ? `${execution.project.name} • ${getPromptSummary(
                       execution.prompt
                     )}`
-                  : getPromptSummary(execution.prompt)
+                  : getPromptSummary(
+                      execution.prompt
+                    )
               }
               time={getRelativeTime(
                 execution.createdAt
               )}
-              color={getColor(execution.status)}
+              color={getColor(
+                execution.status
+              )}
             />
           ))}
         </div>

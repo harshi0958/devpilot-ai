@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   Bell,
   ChevronDown,
@@ -10,85 +11,292 @@ import {
   Settings,
 } from "lucide-react";
 
-import { useTheme } from "@/components/common/ThemeProvider";
-
 import ProfileDropdown from "./ProfileDropdown";
 import NotificationDropdown from "./NotificationDropdown";
-export default function TopNavbar() {
-  const { theme, toggleTheme } = useTheme();
-  const [notifications, setNotifications] = useState([
-  {
-    title: "Frontend AI completed Navbar.tsx",
-    time: "2 min ago",
-  },
-  {
-    title: "Backend AI generated Authentication API",
-    time: "7 min ago",
-  },
-  {
-    title: "Testing AI executed 128 test cases",
-    time: "24 min ago",
-  },
-  {
-    title: "Deployment queued",
-    time: "1 hour ago",
-  },
-]);
-const handleMarkAll = () => {
-  setNotifications([]);
-  setNotificationOpen(false);
+
+type ThemeMode = "dark" | "light";
+
+const useTheme = (): {
+  theme: ThemeMode;
+  toggleTheme: () => void;
+} => {
+  const [theme, setTheme] = useState<ThemeMode>("dark");
+
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem("theme");
+    const preferredTheme: ThemeMode =
+      storedTheme === "light" || storedTheme === "dark"
+        ? storedTheme
+        : "dark";
+
+    setTheme(preferredTheme);
+    document.documentElement.classList.toggle(
+      "dark",
+      preferredTheme === "dark"
+    );
+  }, []);
+
+  const toggleTheme = () => {
+    setTheme((currentTheme) => {
+      const nextTheme: ThemeMode =
+        currentTheme === "dark" ? "light" : "dark";
+
+      document.documentElement.classList.toggle(
+        "dark",
+        nextTheme === "dark"
+      );
+      window.localStorage.setItem("theme", nextTheme);
+
+      return nextTheme;
+    });
+  };
+
+  return { theme, toggleTheme };
 };
 
-const notificationCount = notifications.length;
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
-const [notificationOpen, setNotificationOpen] = useState(false);
+type Execution = {
+  id: string;
+  status: string;
+  createdAt: string;
+  agent?: {
+    name: string;
+  } | null;
+  project?: {
+    name: string;
+  } | null;
+};
+
+type Notification = {
+  title: string;
+  time: string;
+};
+
+export default function TopNavbar() {
+  const { theme, toggleTheme } = useTheme();
+
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationOpen, setNotificationOpen] =
+    useState(false);
 
   const [profileOpen, setProfileOpen] = useState(false);
 
   const profileRef = useRef<HTMLDivElement>(null);
-const notificationRef = useRef<HTMLDivElement>(null);
-  // Close on outside click
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  /* ----------------------------- */
+  /* Fetch recent activity */
+  /* ----------------------------- */
+
   useEffect(() => {
-  function handleClickOutside(event: MouseEvent) {
-    if (
-      profileRef.current &&
-      !profileRef.current.contains(event.target as Node)
-    ) {
-      setProfileOpen(false);
+    let cancelled = false;
+
+    const fetchNotifications = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/api/executions`,
+          {
+            method: "GET",
+            credentials: "include",
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            "Failed to fetch notifications"
+          );
+        }
+
+        const data = await response.json();
+
+        const executions: Execution[] =
+          Array.isArray(data?.data)
+            ? data.data
+            : [];
+
+        const recent = executions
+          .slice(0, 4)
+          .map((execution) => ({
+            title: getNotificationTitle(execution),
+            time: getRelativeTime(
+              execution.createdAt
+            ),
+          }));
+
+        if (!cancelled) {
+          setNotifications(recent);
+        }
+      } catch (error) {
+        console.error(
+          "Failed to load notifications:",
+          error
+        );
+
+        if (!cancelled) {
+          setNotifications([]);
+        }
+      }
+    };
+
+    fetchNotifications();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const getNotificationTitle = (
+    execution: Execution
+  ) => {
+    const agentName =
+      execution.agent?.name || "AI Agent";
+
+    const projectName =
+      execution.project?.name || "Project";
+
+    switch (execution.status) {
+      case "COMPLETED":
+        return `${agentName} completed work on ${projectName}`;
+
+      case "RUNNING":
+        return `${agentName} is working on ${projectName}`;
+
+      case "FAILED":
+        return `${agentName} encountered an issue in ${projectName}`;
+
+      case "QUEUED":
+        return `${agentName} queued work for ${projectName}`;
+
+      default:
+        return `${agentName} updated ${projectName}`;
+    }
+  };
+
+  const getRelativeTime = (date: string) => {
+    const timestamp = new Date(date).getTime();
+
+    if (Number.isNaN(timestamp)) {
+      return "Recently";
     }
 
-    if (
-      notificationRef.current &&
-      !notificationRef.current.contains(event.target as Node)
-    ) {
-      setNotificationOpen(false);
+    const difference = Math.max(
+      0,
+      Date.now() - timestamp
+    );
+
+    const seconds = Math.floor(
+      difference / 1000
+    );
+
+    const minutes = Math.floor(
+      seconds / 60
+    );
+
+    const hours = Math.floor(
+      minutes / 60
+    );
+
+    const days = Math.floor(
+      hours / 24
+    );
+
+    if (seconds < 60) {
+      return "Just now";
     }
-  }
 
-  document.addEventListener("mousedown", handleClickOutside);
+    if (minutes < 60) {
+      return `${minutes} min ago`;
+    }
 
-  return () =>
-    document.removeEventListener(
+    if (hours < 24) {
+      return `${hours} hour${
+        hours > 1 ? "s" : ""
+      } ago`;
+    }
+
+    return `${days} day${
+      days > 1 ? "s" : ""
+    } ago`;
+  };
+
+  /* ----------------------------- */
+  /* Mark notifications as read */
+  /* ----------------------------- */
+
+  const handleMarkAll = () => {
+    setNotifications([]);
+    setNotificationOpen(false);
+  };
+
+  const notificationCount =
+    notifications.length;
+
+  /* ----------------------------- */
+  /* Outside click */
+  /* ----------------------------- */
+
+  useEffect(() => {
+    function handleClickOutside(
+      event: MouseEvent
+    ) {
+      const target = event.target as Node;
+
+      if (
+        profileRef.current &&
+        !profileRef.current.contains(target)
+      ) {
+        setProfileOpen(false);
+      }
+
+      if (
+        notificationRef.current &&
+        !notificationRef.current.contains(target)
+      ) {
+        setNotificationOpen(false);
+      }
+    }
+
+    document.addEventListener(
       "mousedown",
       handleClickOutside
     );
-}, []);
 
-  // Close on Escape
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleClickOutside
+      );
+    };
+  }, []);
+
+  /* ----------------------------- */
+  /* Escape key */
+  /* ----------------------------- */
+
   useEffect(() => {
-  function handleEscape(event: KeyboardEvent) {
-    if (event.key === "Escape") {
-      setProfileOpen(false);
-      setNotificationOpen(false);
+    function handleEscape(
+      event: KeyboardEvent
+    ) {
+      if (event.key === "Escape") {
+        setProfileOpen(false);
+        setNotificationOpen(false);
+      }
     }
-  }
 
-  document.addEventListener("keydown", handleEscape);
+    document.addEventListener(
+      "keydown",
+      handleEscape
+    );
 
-  return () => {
-    document.removeEventListener("keydown", handleEscape);
-  };
-}, []);
+    return () => {
+      document.removeEventListener(
+        "keydown",
+        handleEscape
+      );
+    };
+  }, []);
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1220]/80 backdrop-blur-xl">
@@ -101,8 +309,8 @@ const notificationRef = useRef<HTMLDivElement>(null);
             Dashboard
           </h1>
 
+          {/* Search */}
           <div className="relative hidden md:block">
-
             <Search
               size={18}
               className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
@@ -149,103 +357,113 @@ const notificationRef = useRef<HTMLDivElement>(null);
             >
               Ctrl K
             </div>
-
           </div>
-
         </div>
 
         {/* Right */}
         <div className="flex items-center gap-3">
 
+          {/* Notifications */}
           <div
-  className="relative"
-  ref={notificationRef}
->
-  <button
-    onClick={() =>
-      setNotificationOpen(!notificationOpen)
-    }
-    className="
-      relative
-      flex
-      h-11
-      w-11
-      items-center
-      justify-center
-      rounded-xl
-      border
-      border-white/10
-      bg-[#111827]
-      transition-all
-      hover:border-cyan-500
-    "
-  >
-    <Bell size={18} className="text-white" />
+            className="relative"
+            ref={notificationRef}
+          >
+            <button
+              type="button"
+              onClick={() =>
+                setNotificationOpen(
+                  !notificationOpen
+                )
+              }
+              className="
+                relative
+                flex
+                h-11
+                w-11
+                items-center
+                justify-center
+                rounded-xl
+                border
+                border-white/10
+                bg-[#111827]
+                transition-all
+                hover:border-cyan-500
+              "
+              aria-label="Notifications"
+            >
+              <Bell
+                size={18}
+                className="text-white"
+              />
 
-    {notificationCount > 0 && (
-      <span
-        className="
-          absolute
-          -right-1
-          -top-1
-          flex
-          h-5
-          w-5
-          items-center
-          justify-center
-          rounded-full
-          bg-red-500
-          text-[10px]
-          font-bold
-          text-white
-        "
-      >
-        {notificationCount}
-      </span>
-    )}
-  </button>
+              {notificationCount > 0 && (
+                <span
+                  className="
+                    absolute
+                    -right-1
+                    -top-1
+                    flex
+                    h-5
+                    w-5
+                    items-center
+                    justify-center
+                    rounded-full
+                    bg-red-500
+                    text-[10px]
+                    font-bold
+                    text-white
+                  "
+                >
+                  {notificationCount}
+                </span>
+              )}
+            </button>
 
-  <NotificationDropdown
-  isOpen={notificationOpen}
-  notifications={notifications}
-  onMarkAll={handleMarkAll}
-/>
-</div>
+            <NotificationDropdown
+              isOpen={notificationOpen}
+              notifications={notifications}
+              onMarkAll={handleMarkAll}
+            />
+          </div>
 
           {/* Theme */}
           <button
-  onClick={toggleTheme}
-  className="
-    flex
-    h-11
-    w-11
-    items-center
-    justify-center
-    rounded-xl
-    border
-    border-white/10
-    bg-[#111827]
-    transition-all
-    duration-300
-    hover:border-cyan-500
-    hover:rotate-12
-  "
->
-  {theme === "dark" ? (
-    <Sun
-      size={18}
-      className="text-yellow-400"
-    />
-  ) : (
-    <Moon
-      size={18}
-      className="text-slate-700"
-    />
-  )}
-</button>
+            type="button"
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            className="
+              flex
+              h-11
+              w-11
+              items-center
+              justify-center
+              rounded-xl
+              border
+              border-white/10
+              bg-[#111827]
+              transition-all
+              duration-300
+              hover:border-cyan-500
+              hover:rotate-12
+            "
+          >
+            {theme === "dark" ? (
+              <Sun
+                size={18}
+                className="text-yellow-400"
+              />
+            ) : (
+              <Moon
+                size={18}
+                className="text-slate-700"
+              />
+            )}
+          </button>
 
           {/* Settings */}
-          <button
+          <Link
+            href="/settings"
+            aria-label="Settings"
             className="
               flex
               h-11
@@ -260,14 +478,22 @@ const notificationRef = useRef<HTMLDivElement>(null);
               hover:border-cyan-500
             "
           >
-            <Settings size={18} className="text-white" />
-          </button>
+            <Settings
+              size={18}
+              className="text-white"
+            />
+          </Link>
 
           {/* Profile */}
-          <div className="relative" ref={profileRef}>
-
+          <div
+            className="relative"
+            ref={profileRef}
+          >
             <button
-              onClick={() => setProfileOpen(!profileOpen)}
+              type="button"
+              onClick={() =>
+                setProfileOpen(!profileOpen)
+              }
               className="
                 flex
                 items-center
@@ -311,17 +537,18 @@ const notificationRef = useRef<HTMLDivElement>(null);
               <ChevronDown
                 size={18}
                 className={`hidden lg:block text-slate-400 transition-transform duration-300 ${
-                  profileOpen ? "rotate-180" : ""
+                  profileOpen
+                    ? "rotate-180"
+                    : ""
                 }`}
               />
             </button>
 
-            <ProfileDropdown isOpen={profileOpen} />
-
+            <ProfileDropdown
+              isOpen={profileOpen}
+            />
           </div>
-
         </div>
-
       </div>
     </header>
   );

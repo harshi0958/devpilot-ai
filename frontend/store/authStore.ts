@@ -53,13 +53,17 @@ export const useAuthStore = create<AuthState>((set) => ({
       body.append("password", password);
 
       const response = await fetch(`${API_URL}/api/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        credentials: "include",
-        body: body.toString(),
-      });
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  credentials: "include",
+  body: JSON.stringify({
+    name,
+    email,
+    password,
+  }),
+});
 
       const data = await response.json();
 

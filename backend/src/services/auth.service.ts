@@ -1,14 +1,20 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomInt } from "crypto";
 import { prisma } from "../lib/prisma";
+
+import {
+  sendWelcomeEmail,
+  sendLoginOTPEmail,
+  sendPasswordResetOTPEmail,
+} from "./email.service";
+
+/* =========================================================
+   TYPES
+========================================================= */
 
 interface RegisterInput {
   name: string;
-  email: string;
-  password: string;
-}
-
-interface LoginInput {
   email: string;
   password: string;
 }
@@ -26,20 +32,30 @@ interface AuthResult {
   token: string;
 }
 
+interface OTPResult {
+  success: boolean;
+  message: string;
+  expiresIn: number;
+}
+
+/* =========================================================
+   CONFIG
+========================================================= */
+
 const JWT_SECRET = process.env.JWT_SECRET;
 
 const JWT_EXPIRES_IN =
   process.env.JWT_EXPIRES_IN || "7d";
 
-if (!JWT_SECRET) {
-  console.warn(
-    "⚠️ JWT_SECRET is not configured."
-  );
-}
+/*
+ * OTP validity:
+ * 50 seconds
+ */
+const OTP_EXPIRY_SECONDS = 50;
 
-// ============================================================
-// PASSWORD HASHING
-// ============================================================
+/* =========================================================
+   PASSWORD FUNCTIONS
+========================================================= */
 
 export const hashPassword = async (
   password: string
@@ -47,23 +63,16 @@ export const hashPassword = async (
   return bcrypt.hash(password, 12);
 };
 
-// ============================================================
-// PASSWORD VERIFICATION
-// ============================================================
-
 export const verifyPassword = async (
   password: string,
   passwordHash: string
 ): Promise<boolean> => {
-  return bcrypt.compare(
-    password,
-    passwordHash
-  );
+  return bcrypt.compare(password, passwordHash);
 };
 
-// ============================================================
-// JWT GENERATION
-// ============================================================
+/* =========================================================
+   JWT
+========================================================= */
 
 export const generateToken = (
   user: AuthUser
@@ -82,40 +91,45 @@ export const generateToken = (
     },
     JWT_SECRET,
     {
-      expiresIn: JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"],
+      expiresIn:
+        JWT_EXPIRES_IN as jwt.SignOptions["expiresIn"],
     }
   );
 };
 
-// ============================================================
-// REGISTER
-// ============================================================
+/* =========================================================
+   OTP GENERATOR
+========================================================= */
+
+const generateOTP = (): string => {
+  return randomInt(100000, 1000000).toString();
+};
+
+/* =========================================================
+   REGISTER USER
+========================================================= */
 
 export const registerUser = async (
   input: RegisterInput
 ): Promise<AuthResult> => {
-  const name = input.name.trim();
-  const email = input.email
-    .trim()
-    .toLowerCase();
+  const name = input.name?.trim();
+  const email = input.email?.trim().toLowerCase();
   const password = input.password;
 
+  /* -------------------------
+     VALIDATION
+  ------------------------- */
+
   if (!name) {
-    throw new Error(
-      "Name is required."
-    );
+    throw new Error("Name is required.");
   }
 
   if (!email) {
-    throw new Error(
-      "Email is required."
-    );
+    throw new Error("Email is required.");
   }
 
   if (!password) {
-    throw new Error(
-      "Password is required."
-    );
+    throw new Error("Password is required.");
   }
 
   if (password.length < 8) {
@@ -130,9 +144,9 @@ export const registerUser = async (
     );
   }
 
-  // ----------------------------------------------------------
-  // CHECK EXISTING USER
-  // ----------------------------------------------------------
+  /* -------------------------
+     CHECK EXISTING USER
+  ------------------------- */
 
   const existingUser =
     await prisma.user.findUnique({
@@ -147,23 +161,227 @@ export const registerUser = async (
     );
   }
 
-  // ----------------------------------------------------------
-  // HASH PASSWORD
-  // ----------------------------------------------------------
+  /* -------------------------
+     HASH PASSWORD
+  ------------------------- */
 
   const passwordHash =
     await hashPassword(password);
 
-  // ----------------------------------------------------------
-  // CREATE USER
-  // ----------------------------------------------------------
+  /* -------------------------
+     CREATE USER
+  ------------------------- */
+
+  const user = await prisma.user.create({
+    data: {
+      name,
+      email,
+      passwordHash,
+    },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      createdAt: true,
+    },
+  });
+
+  /* -------------------------
+     GENERATE JWT
+  ------------------------- */
+
+  const token = generateToken(user);
+
+  /* -------------------------
+     SEND WELCOME EMAIL
+  ------------------------- */
+
+  try {
+    await sendWelcomeEmail({
+      name: user.name,
+      email: user.email,
+    });
+  } catch (error) {
+    /*
+     * Account creation should not fail
+     * just because email delivery failed.
+     */
+    console.error(
+      "Welcome Email Error:",
+      error
+    );
+  }
+
+  return {
+    user,
+    token,
+  };
+};
+
+/* =========================================================
+   SEND LOGIN OTP
+========================================================= */
+
+export const sendLoginOTP = async (
+  emailInput: string
+): Promise<OTPResult> => {
+  const email = emailInput?.trim().toLowerCase();
+
+  if (!email) {
+    throw new Error("Email is required.");
+  }
+
+  /* -------------------------
+     FIND USER
+  ------------------------- */
 
   const user =
-    await prisma.user.create({
-      data: {
-        name,
+    await prisma.user.findUnique({
+      where: {
         email,
-        passwordHash,
+      },
+    });
+
+  if (!user) {
+    throw new Error(
+      "No account found with this email."
+    );
+  }
+
+  /* -------------------------
+     INVALIDATE OLD LOGIN OTPs
+  ------------------------- */
+
+  await prisma.emailVerificationCode.updateMany(
+    {
+      where: {
+        userId: user.id,
+        purpose: "LOGIN",
+        usedAt: null,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    }
+  );
+
+  /* -------------------------
+     GENERATE NEW OTP
+  ------------------------- */
+
+  const code = generateOTP();
+
+  const expiresAt = new Date(
+    Date.now() +
+      OTP_EXPIRY_SECONDS * 1000
+  );
+
+  /* -------------------------
+     SAVE OTP
+  ------------------------- */
+
+  await prisma.emailVerificationCode.create({
+    data: {
+      userId: user.id,
+      email: user.email,
+      code,
+      purpose: "LOGIN",
+      expiresAt,
+    },
+  });
+
+  /* -------------------------
+     SEND OTP EMAIL
+  ------------------------- */
+
+  try {
+    await sendLoginOTPEmail({
+      name: user.name,
+      email: user.email,
+      otp: code,
+      expiresInSeconds:
+        OTP_EXPIRY_SECONDS,
+    });
+  } catch (error) {
+    console.error(
+      "Login OTP Email Error:",
+      error
+    );
+
+    /*
+     * Invalidate OTP if email failed.
+     */
+    await prisma.emailVerificationCode.updateMany(
+      {
+        where: {
+          userId: user.id,
+          code,
+          purpose: "LOGIN",
+          usedAt: null,
+        },
+        data: {
+          usedAt: new Date(),
+        },
+      }
+    );
+
+    throw new Error(
+      "Unable to send OTP email. Please try again."
+    );
+  }
+
+  return {
+    success: true,
+    message:
+      "OTP sent successfully to your email.",
+    expiresIn: OTP_EXPIRY_SECONDS,
+  };
+};
+
+/* =========================================================
+   VERIFY LOGIN OTP
+========================================================= */
+
+export const verifyLoginOTP = async (
+  emailInput: string,
+  otpInput: string
+): Promise<AuthResult> => {
+  const email = emailInput?.trim().toLowerCase();
+  const otp = otpInput?.trim();
+
+  /* -------------------------
+     VALIDATION
+  ------------------------- */
+
+  if (!email) {
+    throw new Error("Email is required.");
+  }
+
+  if (!otp) {
+    throw new Error("OTP is required.");
+  }
+
+  if (!/^\d{6}$/.test(otp)) {
+    throw new Error(
+      "OTP must be 6 digits."
+    );
+  }
+
+  if (!JWT_SECRET) {
+    throw new Error(
+      "JWT_SECRET is not configured on the backend."
+    );
+  }
+
+  /* -------------------------
+     FIND USER
+  ------------------------- */
+
+  const user =
+    await prisma.user.findUnique({
+      where: {
+        email,
       },
       select: {
         id: true,
@@ -174,12 +392,78 @@ export const registerUser = async (
       },
     });
 
-  // ----------------------------------------------------------
-  // GENERATE JWT
-  // ----------------------------------------------------------
+  if (!user) {
+    throw new Error(
+      "No account found with this email."
+    );
+  }
 
-  const token =
-    generateToken(user);
+  /* -------------------------
+     FIND OTP
+  ------------------------- */
+
+  const verificationCode =
+    await prisma.emailVerificationCode.findFirst(
+      {
+        where: {
+          userId: user.id,
+          email: user.email,
+          code: otp,
+          purpose: "LOGIN",
+          usedAt: null,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      }
+    );
+
+  if (!verificationCode) {
+    throw new Error(
+      "Invalid or expired OTP."
+    );
+  }
+
+  /* -------------------------
+     CHECK EXPIRY
+  ------------------------- */
+
+  if (
+    verificationCode.expiresAt.getTime() <=
+    Date.now()
+  ) {
+    await prisma.emailVerificationCode.update({
+      where: {
+        id: verificationCode.id,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    });
+
+    throw new Error(
+      "OTP has expired. Please request a new OTP."
+    );
+  }
+
+  /* -------------------------
+     MARK OTP USED
+  ------------------------- */
+
+  await prisma.emailVerificationCode.update({
+    where: {
+      id: verificationCode.id,
+    },
+    data: {
+      usedAt: new Date(),
+    },
+  });
+
+  /* -------------------------
+     GENERATE LOGIN TOKEN
+  ------------------------- */
+
+  const token = generateToken(user);
 
   return {
     user,
@@ -187,96 +471,144 @@ export const registerUser = async (
   };
 };
 
-// ============================================================
-// LOGIN
-// ============================================================
+/* =========================================================
+   RESEND LOGIN OTP
+========================================================= */
 
-export const loginUser = async (
-  input: LoginInput
-): Promise<AuthResult> => {
-  const email = input.email
-    .trim()
-    .toLowerCase();
+export const resendLoginOTP = async (
+  email: string
+): Promise<OTPResult> => {
+  return sendLoginOTP(email);
+};
 
-  const password = input.password;
+/* =========================================================
+   FORGOT PASSWORD
+   SEND PASSWORD RESET OTP
+========================================================= */
 
-  if (!email || !password) {
-    throw new Error(
-      "Email and password are required."
+export const sendPasswordResetOTP =
+  async (
+    emailInput: string
+  ): Promise<OTPResult> => {
+    const email =
+      emailInput?.trim().toLowerCase();
+
+    if (!email) {
+      throw new Error(
+        "Email is required."
+      );
+    }
+
+    /* -------------------------
+       FIND USER
+    ------------------------- */
+
+    const user =
+      await prisma.user.findUnique({
+        where: {
+          email,
+        },
+      });
+
+    if (!user) {
+      throw new Error(
+        "No account found with this email."
+      );
+    }
+
+    /* -------------------------
+       INVALIDATE OLD RESET OTPs
+    ------------------------- */
+
+    await prisma.emailVerificationCode.updateMany(
+      {
+        where: {
+          userId: user.id,
+          purpose: "PASSWORD_RESET",
+          usedAt: null,
+        },
+        data: {
+          usedAt: new Date(),
+        },
+      }
     );
-  }
 
-  if (!JWT_SECRET) {
-    throw new Error(
-      "JWT_SECRET is not configured on the backend."
+    /* -------------------------
+       GENERATE OTP
+    ------------------------- */
+
+    const code = generateOTP();
+
+    const expiresAt = new Date(
+      Date.now() +
+        OTP_EXPIRY_SECONDS * 1000
     );
-  }
 
-  // ----------------------------------------------------------
-  // FIND USER
-  // ----------------------------------------------------------
+    /* -------------------------
+       SAVE OTP
+    ------------------------- */
 
-  const user =
-    await prisma.user.findUnique({
-      where: {
-        email,
+    await prisma.emailVerificationCode.create({
+      data: {
+        userId: user.id,
+        email: user.email,
+        code,
+        purpose: "PASSWORD_RESET",
+        expiresAt,
       },
     });
 
-  // ----------------------------------------------------------
-  // GENERIC ERROR
-  // ----------------------------------------------------------
+    /* -------------------------
+       SEND EMAIL
+    ------------------------- */
 
-  if (!user) {
-    throw new Error(
-      "Invalid email or password."
-    );
-  }
+    try {
+      await sendPasswordResetOTPEmail({
+        name: user.name,
+        email: user.email,
+        otp: code,
+        expiresInSeconds:
+          OTP_EXPIRY_SECONDS,
+      });
+    } catch (error) {
+      console.error(
+        "Password Reset OTP Email Error:",
+        error
+      );
 
-  // ----------------------------------------------------------
-  // VERIFY PASSWORD
-  // ----------------------------------------------------------
+      /*
+       * Invalidate OTP if email fails.
+       */
+      await prisma.emailVerificationCode.updateMany(
+        {
+          where: {
+            userId: user.id,
+            code,
+            purpose: "PASSWORD_RESET",
+            usedAt: null,
+          },
+          data: {
+            usedAt: new Date(),
+          },
+        }
+      );
 
-  const passwordValid =
-    await verifyPassword(
-      password,
-      user.passwordHash
-    );
+      throw new Error(
+        "Unable to send password reset OTP."
+      );
+    }
 
-  if (!passwordValid) {
-    throw new Error(
-      "Invalid email or password."
-    );
-  }
-
-  // ----------------------------------------------------------
-  // USER RESPONSE
-  // ----------------------------------------------------------
-
-  const safeUser: AuthUser = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    createdAt: user.createdAt,
+    return {
+      success: true,
+      message:
+        "Password reset OTP sent successfully.",
+      expiresIn: OTP_EXPIRY_SECONDS,
+    };
   };
 
-  // ----------------------------------------------------------
-  // GENERATE JWT
-  // ----------------------------------------------------------
-
-  const token =
-    generateToken(safeUser);
-
-  return {
-    user: safeUser,
-    token,
-  };
-};
-
-// ============================================================
-// GET USER BY ID
-// ============================================================
+/* =========================================================
+   GET USER BY ID
+========================================================= */
 
 export const getUserById = async (
   userId: string
@@ -300,4 +632,173 @@ export const getUserById = async (
     });
 
   return user;
+};
+
+export const verifyPasswordResetOTP = async (
+  emailInput: string,
+  otpInput: string
+): Promise<{ success: boolean; message: string }> => {
+  const email = emailInput?.trim().toLowerCase();
+  const otp = otpInput?.trim();
+
+  if (!email) throw new Error("Email is required.");
+  if (!otp) throw new Error("OTP is required.");
+
+  if (!/^\d{6}$/.test(otp)) {
+    throw new Error("OTP must be 6 digits.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: {
+      id: true,
+      email: true,
+    },
+  });
+
+  if (!user) {
+    throw new Error("No account found with this email.");
+  }
+
+  const verificationCode =
+    await prisma.emailVerificationCode.findFirst({
+      where: {
+        userId: user.id,
+        email: user.email,
+        code: otp,
+        purpose: "PASSWORD_RESET",
+        usedAt: null,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+  if (!verificationCode) {
+    throw new Error("Invalid or expired OTP.");
+  }
+
+  if (verificationCode.expiresAt.getTime() <= Date.now()) {
+    await prisma.emailVerificationCode.update({
+      where: {
+        id: verificationCode.id,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    });
+
+    throw new Error("OTP has expired. Please request a new OTP.");
+  }
+
+  return {
+    success: true,
+    message: "OTP verified successfully.",
+  };
+};
+
+
+export const resetPassword = async (
+  emailInput: string,
+  otpInput: string,
+  newPassword: string
+): Promise<{ success: boolean; message: string }> => {
+  const email = emailInput?.trim().toLowerCase();
+  const otp = otpInput?.trim();
+
+  if (!email) throw new Error("Email is required.");
+  if (!otp) throw new Error("OTP is required.");
+  if (!newPassword) throw new Error("New password is required.");
+
+  if (!/^\d{6}$/.test(otp)) {
+    throw new Error("OTP must be 6 digits.");
+  }
+
+  if (newPassword.length < 8) {
+    throw new Error("Password must be at least 8 characters.");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: {
+      id: true,
+      email: true,
+    },
+  });
+
+  if (!user) {
+    throw new Error("No account found with this email.");
+  }
+
+  const verificationCode =
+    await prisma.emailVerificationCode.findFirst({
+      where: {
+        userId: user.id,
+        email: user.email,
+        code: otp,
+        purpose: "PASSWORD_RESET",
+        usedAt: null,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+  if (!verificationCode) {
+    throw new Error("Invalid or expired OTP.");
+  }
+
+  if (verificationCode.expiresAt.getTime() <= Date.now()) {
+    await prisma.emailVerificationCode.update({
+      where: {
+        id: verificationCode.id,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    });
+
+    throw new Error("OTP has expired. Please request a new OTP.");
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: {
+        id: user.id,
+      },
+      data: {
+        passwordHash,
+      },
+    }),
+
+    prisma.emailVerificationCode.update({
+      where: {
+        id: verificationCode.id,
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    }),
+
+    prisma.emailVerificationCode.updateMany({
+      where: {
+        userId: user.id,
+        purpose: "PASSWORD_RESET",
+        usedAt: null,
+        id: {
+          not: verificationCode.id,
+        },
+      },
+      data: {
+        usedAt: new Date(),
+      },
+    }),
+  ]);
+
+  return {
+    success: true,
+    message: "Password reset successfully.",
+  };
 };

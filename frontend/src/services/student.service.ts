@@ -1,4 +1,4 @@
-import { Student, CreateStudentInput } from '../types/student';
+import { Student, CreateStudentDTO } from '../types/student';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
@@ -14,7 +14,7 @@ export async function getStudents(): Promise<Student[]> {
   return response.json();
 }
 
-export async function createStudent(data: CreateStudentInput): Promise<Student> {
+export async function createStudent(data: CreateStudentDTO): Promise<Student> {
   const response = await fetch(`${API_URL}/students`, {
     method: 'POST',
     headers: {

@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
-import { executeAgent } from "../services/agent.service";
+import {
+  executeAgent,
+  repairGeneratedProject,
+} from "../services/agent.service";
 import {
   authenticate,
   AuthenticatedRequest,
@@ -291,6 +294,43 @@ Do not wrap the JSON inside markdown code fences.
 
       /*
       |--------------------------------------------------------------------------
+      | Verify Project File Generation
+      |--------------------------------------------------------------------------
+      */
+
+      if (developerResult.generatedFileCount === 0) {
+        console.error(
+          `Developer Agent completed but generated 0 project files | projectId=${project.id}`
+        );
+
+        return res.status(422).json({
+          success: false,
+          message:
+            "Developer Agent completed, but no project files were generated. Please run the build again.",
+          workflow: {
+            projectId: project.id,
+            projectName: project.name,
+            architect: {
+              agentId: architect.id,
+              agentName: architect.name,
+              executionId: architectResult.executionId,
+            },
+            developer: {
+              agentId: developer.id,
+              agentName: developer.name,
+              executionId: developerResult.executionId,
+              generatedFileCount: 0,
+            },
+          },
+          results: {
+            architecture: architectResult.response,
+            development: developerResult.response,
+          },
+        });
+      }
+
+      /*
+      |--------------------------------------------------------------------------
       | Workflow Completed
       |--------------------------------------------------------------------------
       */
@@ -321,6 +361,8 @@ Do not wrap the JSON inside markdown code fences.
             agentName: developer.name,
             executionId:
               developerResult.executionId,
+            generatedFileCount:
+              developerResult.generatedFileCount,
           },
         },
 
@@ -331,6 +373,9 @@ Do not wrap the JSON inside markdown code fences.
           development:
             developerResult.response,
         },
+
+        generatedFileCount:
+          developerResult.generatedFileCount,
       });
     } catch (error) {
       console.error(
@@ -641,6 +686,105 @@ Do not wrap the JSON in markdown code fences.
           error instanceof Error
             ? error.message
             : "Testing workflow failed.",
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/agents/workflow/fix
+ *
+ * Autonomous Repair workflow.
+ *
+ * Flow:
+ * Testing Findings
+ *      ↓
+ * Developer Repair Agent
+ *      ↓
+ * Corrected Project Files
+ */
+router.post(
+  "/workflow/fix",
+  authenticate,
+  async (req: AuthenticatedRequest, res) => {
+    try {
+      if (!req.user?.userId) {
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required. Please login first.",
+        });
+      }
+
+      const { projectId, issues } = req.body;
+
+      if (
+        typeof projectId !== "string" ||
+        !projectId.trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "projectId is required.",
+        });
+      }
+
+      if (!Array.isArray(issues) || issues.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "At least one validation issue is required for repair.",
+        });
+      }
+
+      const project = await prisma.project.findFirst({
+        where: {
+          id: projectId.trim(),
+          ownerId: req.user.userId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!project) {
+        return res.status(404).json({
+          success: false,
+          message: "Project not found or you do not have access to it.",
+        });
+      }
+
+      console.log(
+        `Repair workflow started | project=${project.name} | issues=${issues.length}`
+      );
+
+      const repairResult = await repairGeneratedProject({
+        projectId: project.id,
+        userId: req.user.userId,
+        issues,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Project repair completed successfully.",
+        workflow: {
+          projectId: project.id,
+          projectName: project.name,
+          repair: {
+            generatedFileCount: repairResult.generatedFileCount,
+            executionId: repairResult.executionId,
+          },
+        },
+        generatedFileCount: repairResult.generatedFileCount,
+        result: repairResult.response,
+      });
+    } catch (error) {
+      console.error("Repair Workflow Error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error instanceof Error
+            ? error.message
+            : "Project repair workflow failed.",
       });
     }
   }

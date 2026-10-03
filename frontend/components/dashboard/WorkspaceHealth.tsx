@@ -11,13 +11,15 @@ import {
   XCircle,
 } from "lucide-react";
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 type HealthState = "checking" | "healthy" | "error";
 
 type HealthCard = {
   title: string;
   description: string;
-  status: string;
-  healthy: boolean;
+  status: HealthState;
   icon: React.ReactNode;
 };
 
@@ -35,148 +37,182 @@ export default function WorkspaceHealth() {
     useState<HealthState>("checking");
 
   useEffect(() => {
-    const checkWorkspaceHealth = async () => {
-      // Backend API
-      try {
-        const response = await fetch(
-          "http://localhost:5000/health"
-        );
+    let cancelled = false;
 
-        if (response.ok) {
-          setBackendStatus("healthy");
-        } else {
-          setBackendStatus("error");
-        }
-      } catch {
+    const checkWorkspaceHealth = async () => {
+      const checks = await Promise.allSettled([
+        // Backend API
+        fetch(`${API_URL}/health`),
+
+        // AI Agents
+        fetch(`${API_URL}/api/agents`, {
+          credentials: "include",
+        }),
+
+        // Execution API
+        fetch(`${API_URL}/api/executions`, {
+          credentials: "include",
+        }),
+
+        // Project API
+        fetch(`${API_URL}/api/projects`, {
+          credentials: "include",
+        }),
+      ]);
+
+      if (cancelled) return;
+
+      // -----------------------------
+      // Backend
+      // -----------------------------
+      const backendResult = checks[0];
+
+      if (
+        backendResult.status === "fulfilled" &&
+        backendResult.value.ok
+      ) {
+        setBackendStatus("healthy");
+      } else {
         setBackendStatus("error");
       }
 
+      // -----------------------------
       // AI Agents
-      try {
-        const response = await fetch(
-          "http://localhost:5000/api/agents",
-          {
-            credentials: "include",
-          }
-        );
+      // -----------------------------
+      const agentResult = checks[1];
 
-        const data = await response.json();
+      if (
+        agentResult.status === "fulfilled" &&
+        agentResult.value.ok
+      ) {
+        try {
+          const data = await agentResult.value.json();
 
-        if (
-          response.ok &&
-          data?.success &&
-          Array.isArray(data?.agents) &&
-          data.agents.length > 0
-        ) {
-          setAgentStatus("healthy");
-        } else {
+          setAgentStatus(
+            data?.success &&
+              Array.isArray(data?.agents)
+              ? "healthy"
+              : "error"
+          );
+        } catch {
           setAgentStatus("error");
         }
-      } catch {
+      } else {
         setAgentStatus("error");
       }
 
-      // AI Execution storage
-      try {
-        const response = await fetch(
-          "http://localhost:5000/api/executions",
-          {
-            credentials: "include",
-          }
-        );
+      // -----------------------------
+      // Execution API
+      // -----------------------------
+      const executionResult = checks[2];
 
-        const data = await response.json();
+      if (
+        executionResult.status === "fulfilled" &&
+        executionResult.value.ok
+      ) {
+        try {
+          const data =
+            await executionResult.value.json();
 
-        if (
-          response.ok &&
-          data?.success &&
-          Array.isArray(data?.data)
-        ) {
-          setExecutionStatus("healthy");
-        } else {
+          setExecutionStatus(
+            data?.success &&
+              Array.isArray(data?.data)
+              ? "healthy"
+              : "error"
+          );
+        } catch {
           setExecutionStatus("error");
         }
-      } catch {
+      } else {
         setExecutionStatus("error");
       }
 
-      // Project workspace
-      try {
-        const response = await fetch(
-          "http://localhost:5000/api/projects",
-          {
-            credentials: "include",
-          }
-        );
+      // -----------------------------
+      // Project API
+      // -----------------------------
+      const projectResult = checks[3];
 
-        const data = await response.json();
+      if (
+        projectResult.status === "fulfilled" &&
+        projectResult.value.ok
+      ) {
+        try {
+          const data =
+            await projectResult.value.json();
 
-        if (
-          response.ok &&
-          data?.success &&
-          Array.isArray(data?.projects)
-        ) {
-          setProjectStatus("healthy");
-        } else {
+          setProjectStatus(
+            data?.success &&
+              Array.isArray(data?.projects)
+              ? "healthy"
+              : "error"
+          );
+        } catch {
           setProjectStatus("error");
         }
-      } catch {
+      } else {
         setProjectStatus("error");
       }
     };
 
     checkWorkspaceHealth();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const getStatusText = (status: HealthState) => {
-    if (status === "checking") {
-      return "Checking...";
-    }
+    switch (status) {
+      case "healthy":
+        return "Connected";
 
-    if (status === "healthy") {
-      return "Connected";
-    }
+      case "error":
+        return "Unavailable";
 
-    return "Unavailable";
+      default:
+        return "Checking...";
+    }
   };
 
   const getStatusIcon = (status: HealthState) => {
-    if (status === "checking") {
-      return (
-        <Loader2
-          size={18}
-          className="animate-spin text-yellow-400"
-        />
-      );
-    }
+    switch (status) {
+      case "healthy":
+        return (
+          <CheckCircle2
+            size={18}
+            className="text-emerald-400"
+          />
+        );
 
-    if (status === "healthy") {
-      return (
-        <CheckCircle2
-          size={18}
-          className="text-emerald-400"
-        />
-      );
-    }
+      case "error":
+        return (
+          <XCircle
+            size={18}
+            className="text-red-400"
+          />
+        );
 
-    return (
-      <XCircle
-        size={18}
-        className="text-red-400"
-      />
-    );
+      default:
+        return (
+          <Loader2
+            size={18}
+            className="animate-spin text-yellow-400"
+          />
+        );
+    }
   };
 
   const getStatusClass = (status: HealthState) => {
-    if (status === "healthy") {
-      return "text-emerald-400";
-    }
+    switch (status) {
+      case "healthy":
+        return "text-emerald-400";
 
-    if (status === "error") {
-      return "text-red-400";
-    }
+      case "error":
+        return "text-red-400";
 
-    return "text-yellow-400";
+      default:
+        return "text-yellow-400";
+    }
   };
 
   const healthCards: HealthCard[] = [
@@ -184,32 +220,28 @@ export default function WorkspaceHealth() {
       title: "Backend API",
       description:
         "Express backend and API services",
-      status: getStatusText(backendStatus),
-      healthy: backendStatus === "healthy",
+      status: backendStatus,
       icon: <Activity size={21} />,
     },
     {
       title: "AI Agents",
       description:
         "Registered DevPilot AI agents",
-      status: getStatusText(agentStatus),
-      healthy: agentStatus === "healthy",
+      status: agentStatus,
       icon: <Bot size={21} />,
     },
     {
-      title: "AI Execution Storage",
+      title: "Execution API",
       description:
-        "AI execution history persistence",
-      status: getStatusText(executionStatus),
-      healthy: executionStatus === "healthy",
+        "AI execution history and services",
+      status: executionStatus,
       icon: <Database size={21} />,
     },
     {
       title: "Project Workspace",
       description:
         "Project management API",
-      status: getStatusText(projectStatus),
-      healthy: projectStatus === "healthy",
+      status: projectStatus,
       icon: <FolderKanban size={21} />,
     },
   ];
@@ -230,16 +262,38 @@ export default function WorkspaceHealth() {
         {healthCards.map((card) => (
           <div
             key={card.title}
-            className="rounded-2xl border border-white/10 bg-[#101827] p-6 transition hover:border-cyan-500/20"
+            className="
+              group
+              rounded-2xl
+              border
+              border-white/10
+              bg-[#101827]
+              p-6
+              transition-all
+              duration-300
+              hover:-translate-y-1
+              hover:border-cyan-500/30
+              hover:bg-[#111D30]
+            "
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div
-                  className={`flex h-11 w-11 items-center justify-center rounded-xl ${
-                    card.healthy
-                      ? "bg-emerald-500/10 text-emerald-400"
-                      : "bg-white/5 text-slate-400"
-                  }`}
+                  className={`
+                    flex
+                    h-11
+                    w-11
+                    items-center
+                    justify-center
+                    rounded-xl
+                    ${
+                      card.status === "healthy"
+                        ? "bg-emerald-500/10 text-emerald-400"
+                        : card.status === "error"
+                          ? "bg-red-500/10 text-red-400"
+                          : "bg-yellow-500/10 text-yellow-400"
+                    }
+                  `}
                 >
                   {card.icon}
                 </div>
@@ -255,31 +309,15 @@ export default function WorkspaceHealth() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                {getStatusIcon(
-                  card.title === "Backend API"
-                    ? backendStatus
-                    : card.title === "AI Agents"
-                      ? agentStatus
-                      : card.title ===
-                          "AI Execution Storage"
-                        ? executionStatus
-                        : projectStatus
-                )}
+              <div className="flex shrink-0 items-center gap-2">
+                {getStatusIcon(card.status)}
 
                 <span
                   className={`text-sm font-medium ${getStatusClass(
-                    card.title === "Backend API"
-                      ? backendStatus
-                      : card.title === "AI Agents"
-                        ? agentStatus
-                        : card.title ===
-                            "AI Execution Storage"
-                          ? executionStatus
-                          : projectStatus
+                    card.status
                   )}`}
                 >
-                  {card.status}
+                  {getStatusText(card.status)}
                 </span>
               </div>
             </div>

@@ -1,10 +1,12 @@
-"use client";
 
+"use client";
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 import Sidebar from "@/components/dashboard/Sidebar";
 import TopNavbar from "@/components/dashboard/TopNavbar";
+import { API_URL } from "@/lib/api";
 
 import {
   Activity,
@@ -51,6 +53,29 @@ type ConversationHistory = {
   agentName: string;
   messages: Message[];
   createdAt: string;
+};
+
+type AutonomousStage =
+  | "idle"
+  | "architect"
+  | "developer"
+  | "completed"
+  | "error";
+
+type ValidationIssue = {
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  file: string;
+  problem: string;
+  reason: string;
+  recommendedFix: string;
+};
+
+type ValidationResult = {
+  status: "PASS" | "FAIL";
+  totalIssues: number;
+  filesReviewed: number;
+  issues: ValidationIssue[];
+  summary: string;
 };
 
 // ============================================================
@@ -280,6 +305,54 @@ function AgentsPageContent()  {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+
+  // ==========================================================
+  // AUTONOMOUS BUILD STATE
+  // ==========================================================
+
+  const [autonomousPrompt, setAutonomousPrompt] =
+    useState("");
+
+  const [autonomousRunning, setAutonomousRunning] =
+    useState(false);
+
+  const [autonomousStage, setAutonomousStage] =
+    useState<AutonomousStage>("idle");
+
+  const [autonomousError, setAutonomousError] =
+    useState("");
+
+  const [autonomousResult, setAutonomousResult] =
+    useState<{
+      projectName: string;
+      architecture: string;
+      development: string;
+      generatedFileCount: number;
+    } | null>(null);
+
+  // ==========================================================
+  // GENERATED PROJECT VALIDATION STATE
+  // ==========================================================
+
+  const [validationRunning, setValidationRunning] =
+    useState(false);
+
+  const [validationError, setValidationError] =
+    useState("");
+
+  const [validationResult, setValidationResult] =
+    useState<ValidationResult | null>(null);
+
+  const [repairRunning, setRepairRunning] =
+    useState(false);
+
+  const [repairError, setRepairError] =
+    useState("");
+
+  const [repairResult, setRepairResult] =
+    useState<{
+      generatedFileCount: number;
+    } | null>(null);
 
   // ==========================================================
   // PROJECT CONTEXT
@@ -592,12 +665,12 @@ function AgentsPageContent()  {
       // ======================================================
 
       const agentsResponse = await fetch(
-        "http://localhost:5000/api/agents",
-        {
-          method: "GET",
-          credentials: "include",
-        }
-      );
+  `${API_URL}/api/agents`,
+  {
+    method: "GET",
+    credentials: "include",
+  }
+);
 
       if (!agentsResponse.ok) {
         throw new Error(
@@ -678,7 +751,7 @@ ${currentPrompt}
       // ======================================================
 
       const apiResponse = await fetch(
-        `http://localhost:5000/api/agents/${backendAgent.id}/execute`,
+  `${API_URL}/api/agents/${backendAgent.id}/execute`,
         {
           method: "POST",
 
@@ -787,6 +860,305 @@ ${currentPrompt}
       );
     } finally {
       setRunning(false);
+    }
+  };
+
+  // ==========================================================
+  // AUTONOMOUS BUILD
+  // ==========================================================
+
+  const runAutonomousBuild = async () => {
+    if (
+      !projectId ||
+      !autonomousPrompt.trim() ||
+      autonomousRunning
+    ) {
+      return;
+    }
+
+    const currentPrompt = autonomousPrompt.trim();
+
+    setAutonomousRunning(true);
+    setAutonomousStage("architect");
+    setAutonomousError("");
+    setAutonomousResult(null);
+    setValidationError("");
+    setValidationResult(null);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/agents/workflow/build`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            prompt: currentPrompt,
+            projectId,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.message ||
+            "Autonomous build workflow failed."
+        );
+      }
+
+      setAutonomousStage("developer");
+
+      const architecture =
+        data?.results?.architecture ||
+        "Architecture plan completed.";
+
+      const development =
+        data?.results?.development ||
+        "Developer implementation completed.";
+
+      setAutonomousResult({
+        projectName:
+          data?.workflow?.projectName ||
+          "Connected project",
+        architecture,
+        development,
+        generatedFileCount:
+          Number(
+            data?.workflow?.developer?.generatedFileCount ??
+              data?.generatedFileCount ??
+              0
+          ),
+      });
+
+      setAutonomousStage("completed");
+      setAutonomousPrompt("");
+    } catch (error) {
+      console.error(
+        "Autonomous Build Error:",
+        error
+      );
+
+      setAutonomousStage("error");
+      setAutonomousError(
+        error instanceof Error
+          ? error.message
+          : "Autonomous build workflow failed."
+      );
+    } finally {
+      setAutonomousRunning(false);
+    }
+  };
+
+  // ==========================================================
+  // VALIDATE GENERATED PROJECT
+  // ==========================================================
+
+  const validateGeneratedProject = async () => {
+    if (!projectId || validationRunning || autonomousRunning) {
+      return;
+    }
+
+    setValidationRunning(true);
+    setValidationError("");
+    setValidationResult(null);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/agents/workflow/test`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            projectId,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.message ||
+            "Project validation failed."
+        );
+      }
+
+      const rawResult =
+        typeof data?.result === "string"
+          ? data.result.trim()
+          : "";
+
+      let parsed: ValidationResult;
+
+      try {
+        const cleaned = rawResult
+          .replace(/^```json\s*/i, "")
+          .replace(/^```\s*/i, "")
+          .replace(/\s*```$/i, "")
+          .trim();
+
+        parsed = JSON.parse(cleaned);
+      } catch {
+        parsed = {
+          status: "FAIL",
+          totalIssues: 1,
+          filesReviewed:
+            Number(
+              data?.workflow?.testing?.filesReviewed ??
+                0
+            ),
+          issues: [
+            {
+              severity: "HIGH",
+              file: "Validation response",
+              problem:
+                "Testing Agent returned a response that could not be parsed as structured JSON.",
+              reason:
+                "The validation result was not returned in the expected machine-readable format.",
+              recommendedFix:
+                "Review the Testing Agent response and run validation again.",
+            },
+          ],
+          summary:
+            rawResult ||
+            "Testing Agent returned an unreadable validation response.",
+        };
+      }
+
+      const normalized: ValidationResult = {
+        status:
+          parsed.status === "PASS"
+            ? "PASS"
+            : "FAIL",
+        totalIssues:
+          Number(parsed.totalIssues) ||
+          (Array.isArray(parsed.issues)
+            ? parsed.issues.length
+            : 0),
+        filesReviewed:
+          Number(parsed.filesReviewed) ||
+          Number(
+            data?.workflow?.testing?.filesReviewed ??
+              0
+          ),
+        issues: Array.isArray(parsed.issues)
+          ? parsed.issues.map((issue) => ({
+              severity:
+                issue?.severity === "HIGH" ||
+                issue?.severity === "MEDIUM"
+                  ? issue.severity
+                  : "LOW",
+              file: issue?.file || "Unknown file",
+              problem:
+                issue?.problem ||
+                "Unspecified issue",
+              reason:
+                issue?.reason ||
+                "No reason provided.",
+              recommendedFix:
+                issue?.recommendedFix ||
+                "Review and correct the reported issue.",
+            }))
+          : [],
+        summary:
+          parsed.summary ||
+          "Validation completed.",
+      };
+
+      setValidationResult(normalized);
+    } catch (error) {
+      console.error(
+        "Project Validation Error:",
+        error
+      );
+
+      setValidationError(
+        error instanceof Error
+          ? error.message
+          : "Project validation failed."
+      );
+    } finally {
+      setValidationRunning(false);
+    }
+  };
+
+  // ==========================================================
+  // AUTO-REPAIR GENERATED PROJECT
+  // ==========================================================
+
+  const repairGeneratedProject = async () => {
+    if (
+      !projectId ||
+      !validationResult ||
+      validationResult.issues.length === 0 ||
+      repairRunning ||
+      validationRunning ||
+      autonomousRunning
+    ) {
+      return;
+    }
+
+    setRepairRunning(true);
+    setRepairError("");
+    setRepairResult(null);
+
+    try {
+      const response = await fetch(
+        `${API_URL}/api/agents/workflow/fix`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            projectId,
+            issues: validationResult.issues,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        throw new Error(
+          data?.message ||
+            "Automatic project repair failed."
+        );
+      }
+
+      const generatedFileCount = Number(
+        data?.workflow?.repair?.generatedFileCount ??
+          data?.generatedFileCount ??
+          0
+      );
+
+      setRepairResult({
+        generatedFileCount,
+      });
+
+      // The project changed, so the previous validation result is stale.
+      setValidationResult(null);
+    } catch (error) {
+      console.error(
+        "Project Repair Error:",
+        error
+      );
+
+      setRepairError(
+        error instanceof Error
+          ? error.message
+          : "Automatic project repair failed."
+      );
+    } finally {
+      setRepairRunning(false);
     }
   };
 
@@ -965,6 +1337,300 @@ ${currentPrompt}
               </div>
             </div>
 
+            {/* AUTONOMOUS BUILD */}
+
+            <div className="mb-8 overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/8 via-[#0B1220] to-[#0B1220]">
+              <div className="border-b border-white/10 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-cyan-500/10">
+                      <Sparkles size={21} className="text-cyan-400" />
+                    </div>
+
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-xl font-bold text-white">
+                          Autonomous Build
+                        </h2>
+                        <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-[10px] font-medium text-cyan-300">
+                          Architect → Developer → Testing
+                        </span>
+                      </div>
+
+                      <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
+                        Give DevPilot a software requirement and let the Architect and Developer agents plan and generate the implementation for your connected project.
+                      </p>
+                    </div>
+                  </div>
+
+                  {projectId ? (
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300">
+                      Project connected
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+                      Open from a project
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid gap-5 p-5 lg:grid-cols-[1fr_280px]">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-white">
+                    What do you want to build?
+                  </label>
+
+                  <textarea
+                    rows={5}
+                    value={autonomousPrompt}
+                    onChange={(event) =>
+                      setAutonomousPrompt(event.target.value)
+                    }
+                    disabled={!projectId || autonomousRunning}
+                    placeholder={
+                      projectId
+                        ? "Example: Build a student management module with student CRUD, authentication, admin dashboard and REST APIs."
+                        : "Open AI Workspace from a project to start an autonomous build."
+                    }
+                    className="w-full resize-none rounded-2xl border border-white/10 bg-[#080E19] px-4 py-3 text-sm leading-6 text-slate-300 outline-none placeholder:text-slate-700 focus:border-cyan-500/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+
+                  {autonomousError && (
+                    <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-xs text-red-300">
+                      {autonomousError}
+                    </div>
+                  )}
+
+                  {autonomousResult && autonomousStage === "completed" && (
+                    <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
+                        <Check size={15} />
+                        Autonomous build completed
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Architect planning and Developer file generation completed for {autonomousResult.projectName}.
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-1 text-[11px] text-emerald-300">
+                          {autonomousResult.generatedFileCount} project file{autonomousResult.generatedFileCount === 1 ? "" : "s"} generated
+                        </span>
+
+                        {projectId && (
+                          <Link
+                            href={`/files?projectId=${encodeURIComponent(projectId)}`}
+                            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-slate-300 transition hover:bg-white/10 hover:text-white"
+                          >
+                            Open Project Files
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {autonomousResult && autonomousStage === "completed" && (
+                    <div className="mt-3 rounded-xl border border-violet-500/20 bg-violet-500/5 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 text-sm font-semibold text-violet-300">
+                            <Activity size={15} />
+                            Validate Generated Project
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Review generated files for TypeScript, imports, APIs, Prisma, security and integration issues.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={validateGeneratedProject}
+                          disabled={validationRunning}
+                          className="inline-flex items-center gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs font-semibold text-violet-300 transition hover:bg-violet-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {validationRunning ? (
+                            <>
+                              <Loader2 size={14} className="animate-spin" />
+                              Validating...
+                            </>
+                          ) : (
+                            <>
+                              <Check size={14} />
+                              Validate Project
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {validationError && (
+                        <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+                          {validationError}
+                        </div>
+                      )}
+
+                      {validationResult && (
+                        <div className="mt-4 rounded-xl border border-white/10 bg-[#080E19] p-4">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${validationResult.status === "PASS" ? "border border-emerald-500/20 bg-emerald-500/5 text-emerald-300" : "border border-amber-500/20 bg-amber-500/5 text-amber-300"}`}>
+                              {validationResult.status === "PASS" ? "Validation Passed" : "Issues Found"}
+                            </span>
+                            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-400">
+                              {validationResult.filesReviewed} files reviewed
+                            </span>
+                            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-400">
+                              {validationResult.totalIssues} issue{validationResult.totalIssues === 1 ? "" : "s"}
+                            </span>
+                          </div>
+
+                          <p className="mt-3 text-xs leading-5 text-slate-400">
+                            {validationResult.summary}
+                          </p>
+
+                          {validationResult.issues.length > 0 && (
+                            <div className="mt-4 space-y-2">
+                              {validationResult.issues.slice(0, 5).map((issue, index) => (
+                                <div key={`${issue.file}-${index}`} className="rounded-lg border border-white/5 bg-white/[0.02] p-3">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${issue.severity === "HIGH" ? "bg-red-500/10 text-red-300" : issue.severity === "MEDIUM" ? "bg-amber-500/10 text-amber-300" : "bg-slate-500/10 text-slate-300"}`}>
+                                      {issue.severity}
+                                    </span>
+                                    <span className="font-mono text-[10px] text-slate-500">
+                                      {issue.file}
+                                    </span>
+                                  </div>
+                                  <p className="mt-1 text-xs font-medium text-slate-300">
+                                    {issue.problem}
+                                  </p>
+                                  <p className="mt-1 text-[11px] leading-5 text-slate-500">
+                                    Fix: {issue.recommendedFix}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {repairError && (
+                        <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+                          {repairError}
+                        </div>
+                      )}
+
+                      {repairResult && (
+                        <div className="mt-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-xs text-cyan-300">
+                          <span className="font-semibold">AI Repair completed.</span>{" "}
+                          {repairResult.generatedFileCount} project file{repairResult.generatedFileCount === 1 ? "" : "s"} updated.
+                          Run validation again to verify the fixes.
+                        </div>
+                      )}
+
+                      {validationResult &&
+                        validationResult.status === "FAIL" &&
+                        validationResult.issues.length > 0 && (
+                          <div className="mt-3 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={repairGeneratedProject}
+                              disabled={repairRunning}
+                              className="inline-flex items-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-300 transition hover:bg-cyan-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {repairRunning ? (
+                                <>
+                                  <Loader2 size={14} className="animate-spin" />
+                                  Repairing Project...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles size={14} />
+                                  Fix Issues Automatically
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={runAutonomousBuild}
+                    disabled={
+                      !projectId ||
+                      !autonomousPrompt.trim() ||
+                      autonomousRunning
+                    }
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {autonomousRunning ? (
+                      <>
+                        <Loader2 size={17} className="animate-spin" />
+                        {autonomousStage === "architect"
+                          ? "Architect is planning..."
+                          : "Developer is generating files..."}
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={17} />
+                        Start Autonomous Build
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#080E19] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Workflow
+                  </p>
+
+                  <div className="mt-4 space-y-3">
+                    <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${autonomousStage === "architect" ? "border-cyan-500/30 bg-cyan-500/5" : autonomousStage === "developer" || autonomousStage === "completed" ? "border-emerald-500/20 bg-emerald-500/5" : "border-white/5"}`}>
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500/10 text-xs font-bold text-cyan-400">
+                        1
+                      </div>
+                      <span className="text-xs text-slate-300">Architect Agent</span>
+                    </div>
+
+                    <div className="ml-6 h-3 w-px bg-white/10" />
+
+                    <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${autonomousStage === "developer" ? "border-cyan-500/30 bg-cyan-500/5" : autonomousStage === "completed" ? "border-emerald-500/20 bg-emerald-500/5" : "border-white/5"}`}>
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-xs font-bold text-violet-400">
+                        2
+                      </div>
+                      <span className="text-xs text-slate-300">Developer Agent</span>
+                    </div>
+
+                    <div className="ml-6 h-3 w-px bg-white/10" />
+
+                    <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${autonomousStage === "completed" ? "border-emerald-500/20 bg-emerald-500/5" : "border-white/5"}`}>
+                      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 text-xs font-bold text-emerald-400">
+                        3
+                      </div>
+                      <span className="text-xs text-slate-300">Project Files</span>
+                    </div>
+
+                    {validationResult && (
+                      <>
+                        <div className="ml-6 h-3 w-px bg-white/10" />
+                        <div className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${validationResult.status === "PASS" ? "border-emerald-500/20 bg-emerald-500/5" : "border-amber-500/20 bg-amber-500/5"}`}>
+                          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/10 text-xs font-bold text-violet-400">
+                            4
+                          </div>
+                          <span className="text-xs text-slate-300">Testing & Validation</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {!projectId && (
+                    <p className="mt-4 text-[11px] leading-5 text-slate-600">
+                      Go to Projects → open a project → Open AI Workspace.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h2 className="text-xl font-semibold text-white">
@@ -982,7 +1648,7 @@ ${currentPrompt}
             </div>
 
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {agents.map((agent) => (
+ {agents.map((agent) => (
                 <AgentCard
                   key={agent.id}
                   {...agent}

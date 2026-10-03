@@ -9,6 +9,9 @@ import {
   CalendarDays,
 } from "lucide-react";
 
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 type Project = {
   id: string;
   name: string;
@@ -29,27 +32,35 @@ export default function RecentProjects() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchProjects = async () => {
       try {
         setLoading(true);
 
         const response = await fetch(
-          "http://localhost:5000/api/projects",
+          `${API_URL}/api/projects`,
           {
             method: "GET",
             credentials: "include",
           }
         );
 
-        const data: ProjectsResponse = await response.json();
-
-        if (!response.ok || !data.success) {
+        if (!response.ok) {
           throw new Error(
-            "Failed to fetch projects"
+            `Failed to fetch projects: ${response.status}`
           );
         }
 
-        // Backend returns: { success, count, projects }
+        const data: ProjectsResponse =
+          await response.json();
+
+        if (!data.success) {
+          throw new Error("Failed to fetch projects");
+        }
+
+        if (cancelled) return;
+
         const projectList = Array.isArray(data.projects)
           ? data.projects
           : [];
@@ -64,18 +75,25 @@ export default function RecentProjects() {
 
         setProjects(sortedProjects);
       } catch (error) {
-        console.error(
-          "Failed to load recent projects:",
-          error
-        );
-
-        setProjects([]);
+        if (!cancelled) {
+          console.error(
+            "Failed to load recent projects:",
+            error
+          );
+          setProjects([]);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
     fetchProjects();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const formatDate = (date: string) => {
@@ -122,7 +140,6 @@ export default function RecentProjects() {
               size={20}
               className="animate-spin text-cyan-400"
             />
-
             Loading projects...
           </div>
         </div>

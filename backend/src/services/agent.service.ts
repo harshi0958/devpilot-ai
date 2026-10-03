@@ -15,6 +15,7 @@ interface ExecuteAgentInput {
   userId?: string;
   projectId?: string;
   conversationId?: string;
+  allowedFilePaths?: string[];
 }
 
 interface ExecuteAgentResult {
@@ -24,6 +25,8 @@ interface ExecuteAgentResult {
   response: string;
   model: string;
   durationMs: number;
+  generatedFileCount: number;
+  generatedFilePaths: string[];
   executionId?: string;
 }
 
@@ -73,6 +76,20 @@ const sleep = (ms: number) =>
 |--------------------------------------------------------------------------
 */
 
+function isRateLimitError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(error).toLowerCase();
+
+  return (
+    message.includes("429") ||
+    message.includes("rate limit") ||
+    message.includes("too_many_requests") ||
+    message.includes("resource exhausted")
+  );
+}
+
 function isRetryableGeminiError(error: unknown): boolean {
   const message =
     error instanceof Error
@@ -118,7 +135,7 @@ async function generateGeminiRequest(
     input: prompt,
     generation_config: {
       thinking_level: "low",
-      max_output_tokens: 2500,
+      max_output_tokens: 12000,
     },
   });
 
@@ -177,6 +194,13 @@ async function generateGeminiResponse(
         error
       );
 
+      // A long Gemini 429 cooldown should not waste the remaining
+      // retry attempts. The caller can immediately move to the
+      // configured fallback model instead.
+      if (isRateLimitError(error)) {
+        break;
+      }
+
       if (
         !isRetryableGeminiError(error) ||
         attempt === maxRetries
@@ -207,7 +231,8 @@ async function generateGeminiResponse(
 
 async function getProjectContext(
   projectId: string | undefined,
-  userId: string | undefined
+  userId: string | undefined,
+  agentType?: AgentType
 ): Promise<string> {
   if (!projectId || !userId) {
     return `
@@ -249,6 +274,54 @@ state assumptions before making them.
     );
   }
 
+  let projectFilesContext = "";
+
+  if (agentType === "DEBUGGER") {
+    const files = await prisma.projectFile.findMany({
+      where: {
+        projectId: project.id,
+        type: "FILE",
+      },
+      orderBy: { path: "asc" },
+      select: {
+        path: true,
+        content: true,
+      },
+      take: 40,
+    });
+
+    const MAX_FILE_CHARS = 12000;
+    const MAX_TOTAL_CHARS = 180000;
+    let totalChars = 0;
+    const sections: string[] = [];
+
+    for (const file of files) {
+      if (totalChars >= MAX_TOTAL_CHARS) break;
+
+      const remaining = MAX_TOTAL_CHARS - totalChars;
+      const limit = Math.min(MAX_FILE_CHARS, remaining);
+      const content = file.content || "";
+      const clipped = content.length > limit
+        ? `${content.slice(0, limit)}\n\n[FILE CONTENT TRUNCATED FOR CONTEXT SIZE]`
+        : content;
+
+      sections.push(`FILE: ${file.path}\n\`\`\`\n${clipped}\n\`\`\``);
+      totalChars += clipped.length;
+    }
+
+    projectFilesContext = `
+
+ACTUAL PROJECT FILES — DEBUGGER SOURCE OF TRUTH
+================================================
+
+The following files are the actual contents stored for this project.
+Analyze these files directly. Do NOT invent files, errors, technologies,
+or code that is not supported by the supplied contents.
+
+${sections.length ? sections.join("\n\n") : "No project files are currently available."}
+`;
+  }
+
   return `
 PROJECT CONTEXT
 ===============
@@ -270,6 +343,7 @@ Current Project Statistics:
 - Conversations: ${project._count.conversations}
 - AI Executions: ${project._count.executions}
 - Project Files: ${project._count.files}
+${projectFilesContext}
 
 DEVPILOT PLATFORM TECHNOLOGY
 ============================
@@ -356,10 +430,11 @@ IMPORTANT ARCHITECTURE RULES
 
 async function saveDeveloperFiles(
   responseText: string,
-  projectId?: string
-): Promise<number> {
+  projectId?: string,
+  allowedFilePaths?: string[]
+): Promise<{ count: number; paths: string[] }> {
   if (!projectId) {
-    return 0;
+    return { count: 0, paths: [] };
   }
 
   type GeneratedFile = {
@@ -368,54 +443,283 @@ async function saveDeveloperFiles(
   };
 
   const generatedFiles: GeneratedFile[] = [];
+  const allowedPaths =
+    allowedFilePaths && allowedFilePaths.length > 0
+      ? new Set(
+          allowedFilePaths
+            .map((path) =>
+              path.trim().replace(/^\/+/, "").replace(/\\/g, "/")
+            )
+            .filter(Boolean)
+        )
+      : null;
+
+  const addGeneratedFile = (
+    path: unknown,
+    content: unknown
+  ) => {
+    if (
+      typeof path !== "string" ||
+      typeof content !== "string"
+    ) {
+      return;
+    }
+
+    const cleanPath = path
+      .trim()
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/");
+
+    if (
+      !cleanPath ||
+      cleanPath === "." ||
+      cleanPath.includes("../") ||
+      cleanPath.startsWith("../") ||
+      cleanPath.includes("/..")
+    ) {
+      return;
+    }
+
+    if (allowedPaths && !allowedPaths.has(cleanPath)) {
+      return;
+    }
+
+    generatedFiles.push({
+      path: cleanPath,
+      content: content.trim(),
+    });
+  };
 
   /*
   |--------------------------------------------------------------------------
-  | Parser 1: JSON
+  | Parser 1: Exact JSON / fenced JSON / embedded JSON
   |--------------------------------------------------------------------------
   */
 
-  try {
-    const cleanedJson = responseText
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/\s*```$/i, "")
-      .trim();
+  const parseFilePayload = (parsed: unknown): number => {
+    if (!parsed || typeof parsed !== "object") {
+      return 0;
+    }
 
-    const parsed = JSON.parse(cleanedJson);
+    const payload = parsed as { files?: unknown };
 
-    if (parsed && Array.isArray(parsed.files)) {
-      for (const file of parsed.files) {
-        if (
-          file &&
-          typeof file.path === "string" &&
-          typeof file.content === "string"
-        ) {
-          generatedFiles.push({
-            path: file.path,
-            content: file.content,
-          });
+    if (!Array.isArray(payload.files)) {
+      return 0;
+    }
+
+    let count = 0;
+
+    for (const file of payload.files) {
+      if (!file || typeof file !== "object") {
+        continue;
+      }
+
+      const item = file as {
+        path?: unknown;
+        content?: unknown;
+      };
+
+      const before = generatedFiles.length;
+
+      addGeneratedFile(item.path, item.content);
+
+      if (generatedFiles.length > before) {
+        count++;
+      }
+    }
+
+    return count;
+  };
+
+  const extractBalancedJsonObject = (
+    value: string,
+    startIndex: number
+  ): string | null => {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = startIndex; i < value.length; i++) {
+      const char = value[i];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+
+      if (char === "{") {
+        depth++;
+      } else if (char === "}") {
+        depth--;
+
+        if (depth === 0) {
+          return value.slice(startIndex, i + 1);
+        }
+
+        if (depth < 0) {
+          return null;
         }
       }
     }
-  } catch {
-    // JSON parsing failed.
-    // Continue with Markdown parser.
+
+    return null;
+  };
+
+  const tryParseFilesJson = (value: string): boolean => {
+    const trimmed = value.trim();
+
+    const candidates = [
+      trimmed,
+      trimmed
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim(),
+    ];
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parseFilePayload(parsed) > 0) {
+          return true;
+        }
+      } catch {
+        // The response may contain explanatory text or be truncated.
+      }
+    }
+
+    // Recover the first complete JSON object even when Gemini added text
+    // before/after it. This is deliberately string-aware so braces inside
+    // generated source code do not terminate the JSON object early.
+    let searchIndex = 0;
+
+    while (searchIndex < trimmed.length) {
+      const objectStart = trimmed.indexOf("{", searchIndex);
+
+      if (objectStart < 0) {
+        break;
+      }
+
+      const objectText = extractBalancedJsonObject(
+        trimmed,
+        objectStart
+      );
+
+      if (objectText) {
+        try {
+          const parsed = JSON.parse(objectText);
+          if (parseFilePayload(parsed) > 0) {
+            return true;
+          }
+        } catch {
+          // Continue searching for another JSON object.
+        }
+      }
+
+      searchIndex = objectStart + 1;
+    }
+
+    return false;
+  };
+
+  tryParseFilesJson(responseText);
+
+  /*
+  |--------------------------------------------------------------------------
+  | Parser 2: Recover complete file objects from a truncated/partially
+  | malformed JSON response.
+  |--------------------------------------------------------------------------
+  */
+
+  if (generatedFiles.length === 0) {
+    const filesKeyIndex = responseText.search(/"files"\s*:\s*\[/i);
+
+    if (filesKeyIndex >= 0) {
+      const arrayStart = responseText.indexOf("[", filesKeyIndex);
+
+      if (arrayStart >= 0) {
+        let objectStart = -1;
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+
+        for (let i = arrayStart + 1; i < responseText.length; i++) {
+          const char = responseText[i];
+
+          if (inString) {
+            if (escaped) {
+              escaped = false;
+            } else if (char === "\\") {
+              escaped = true;
+            } else if (char === '"') {
+              inString = false;
+            }
+            continue;
+          }
+
+          if (char === '"') {
+            inString = true;
+            continue;
+          }
+
+          if (char === "{") {
+            if (depth === 0) {
+              objectStart = i;
+            }
+            depth++;
+            continue;
+          }
+
+          if (char === "}" && depth > 0) {
+            depth--;
+
+            if (depth === 0 && objectStart >= 0) {
+              const objectText = responseText.slice(
+                objectStart,
+                i + 1
+              );
+
+              try {
+                const parsed = JSON.parse(objectText);
+                parseFilePayload(parsed);
+              } catch {
+                // Ignore only this object; later complete objects may still
+                // be recoverable from the same response.
+              }
+
+              objectStart = -1;
+            }
+          }
+        }
+      }
+    }
   }
 
   /*
   |--------------------------------------------------------------------------
-  | Parser 2: Markdown Heading + Code Block
+  | Parser 3: Markdown / code blocks
   |--------------------------------------------------------------------------
   |
-  | Example:
+  | Supported examples:
   |
-  | ### Student Controller (`server/controllers/student.controller.ts`)
+  | ### `src/app/page.tsx`
+  | ### src/app/page.tsx
+  | FILE: src/app/page.tsx
+  | **src/app/page.tsx**
   |
-  | ```typescript
+  | ```tsx
   | ...
   | ```
-  |
   |--------------------------------------------------------------------------
   */
 
@@ -424,55 +728,47 @@ async function saveDeveloperFiles(
 
     let pendingPath: string | null = null;
     let insideCodeBlock = false;
-    let codeLanguage = "";
     let codeLines: string[] = [];
 
-    for (const line of lines) {
-      /*
-      |--------------------------------------------------------------------------
-      | Detect file path
-      |--------------------------------------------------------------------------
-      */
+    const detectPath = (line: string): string | null => {
+      const candidates = [
+        line.match(/`([^`\n]+\.[a-zA-Z0-9]+)`/),
+        line.match(/^\s*#{1,6}\s+`?([^`\n]+\.[a-zA-Z0-9]+)`?\s*$/),
+        line.match(/^\s*FILE:\s*`?([^`\n]+\.[a-zA-Z0-9]+)`?\s*$/i),
+        line.match(/^\s*\*\*([^*\n]+\.[a-zA-Z0-9]+)\*\*\s*$/),
+      ];
 
-      const pathMatch = line.match(
-        /`([^`\n]+\.[a-zA-Z0-9]+)`/
-      );
+      for (const match of candidates) {
+        const value = match?.[1]?.trim();
 
-      if (!insideCodeBlock && pathMatch) {
-        const possiblePath = pathMatch[1].trim();
-
-        if (
-          possiblePath.includes("/") ||
-          possiblePath.includes("\\") ||
-          possiblePath.includes(".")
-        ) {
-          pendingPath = possiblePath;
+        if (value) {
+          return value;
         }
       }
 
-      /*
-      |--------------------------------------------------------------------------
-      | Start code block
-      |--------------------------------------------------------------------------
-      */
+      return null;
+    };
+
+    for (const line of lines) {
+      if (!insideCodeBlock) {
+        const detectedPath = detectPath(line);
+
+        if (detectedPath) {
+          pendingPath = detectedPath;
+        }
+      }
 
       if (!insideCodeBlock) {
-        const fenceMatch =
-          line.match(/^```([a-zA-Z0-9+#.-]*)\s*$/);
+        const fenceMatch = line.match(
+          /^```[a-zA-Z0-9+#.-]*\s*$/
+        );
 
         if (fenceMatch) {
           insideCodeBlock = true;
-          codeLanguage = fenceMatch[1] || "";
           codeLines = [];
           continue;
         }
       }
-
-      /*
-      |--------------------------------------------------------------------------
-      | End code block
-      |--------------------------------------------------------------------------
-      */
 
       if (
         insideCodeBlock &&
@@ -484,29 +780,16 @@ async function saveDeveloperFiles(
           pendingPath &&
           codeLines.length > 0
         ) {
-          const content =
-            codeLines.join("\n").trim();
-
-          if (content) {
-            generatedFiles.push({
-              path: pendingPath,
-              content,
-            });
-          }
+          addGeneratedFile(
+            pendingPath,
+            codeLines.join("\n")
+          );
         }
 
         pendingPath = null;
-        codeLanguage = "";
         codeLines = [];
-
         continue;
       }
-
-      /*
-      |--------------------------------------------------------------------------
-      | Collect code
-      |--------------------------------------------------------------------------
-      */
 
       if (insideCodeBlock) {
         codeLines.push(line);
@@ -526,44 +809,32 @@ async function saveDeveloperFiles(
   >();
 
   for (const file of generatedFiles) {
-    const cleanPath = file.path
-      .trim()
-      .replace(/^\/+/, "")
-      .replace(/\\/g, "/");
-
-    if (!cleanPath) {
+    if (!file.content.trim()) {
       continue;
     }
 
-    uniqueFiles.set(cleanPath, {
-      path: cleanPath,
-      content: file.content,
-    });
+    uniqueFiles.set(file.path, file);
   }
-
-  /*
-  |--------------------------------------------------------------------------
-  | Save Files
-  |--------------------------------------------------------------------------
-  */
 
   if (uniqueFiles.size === 0) {
     console.warn(
       "Developer Agent response did not contain parseable project files."
     );
 
-    return 0;
+    console.warn(
+      "Developer response preview:",
+      responseText.slice(0, 1200)
+    );
+
+    return { count: 0, paths: [] };
   }
 
   let savedCount = 0;
 
   for (const file of uniqueFiles.values()) {
     const cleanPath = file.path;
-
     const pathParts = cleanPath.split("/");
-
-    const name =
-      pathParts[pathParts.length - 1];
+    const name = pathParts[pathParts.length - 1];
 
     if (!name) {
       continue;
@@ -571,23 +842,15 @@ async function saveDeveloperFiles(
 
     const parentPath =
       pathParts.length > 1
-        ? pathParts
-            .slice(0, -1)
-            .join("/")
+        ? pathParts.slice(0, -1).join("/")
         : null;
 
     const extension =
       name.includes(".")
-        ? name
-            .split(".")
-            .pop()
-            ?.toLowerCase()
+        ? name.split(".").pop()?.toLowerCase()
         : undefined;
 
-    const mimeTypes: Record<
-      string,
-      string
-    > = {
+    const mimeTypes: Record<string, string> = {
       ts: "text/typescript",
       tsx: "text/tsx",
       js: "text/javascript",
@@ -598,6 +861,10 @@ async function saveDeveloperFiles(
       md: "text/markdown",
       txt: "text/plain",
       prisma: "text/plain",
+      sql: "application/sql",
+      java: "text/x-java-source",
+      py: "text/x-python",
+      env: "text/plain",
     };
 
     const mimeType =
@@ -606,10 +873,7 @@ async function saveDeveloperFiles(
         : "text/plain";
 
     const size = BigInt(
-      Buffer.byteLength(
-        file.content,
-        "utf8"
-      )
+      Buffer.byteLength(file.content, "utf8")
     );
 
     await prisma.projectFile.upsert({
@@ -643,11 +907,299 @@ async function saveDeveloperFiles(
     savedCount++;
   }
 
+  const savedPaths = Array.from(uniqueFiles.keys());
+
   console.log(
     `Developer Agent saved ${savedCount} project file(s) | projectId=${projectId}`
   );
 
-  return savedCount;
+  return {
+    count: savedCount,
+    paths: savedPaths,
+  };
+}
+
+export async function repairGeneratedProject(input: {
+  projectId: string;
+  userId: string;
+  issues: Array<{
+    severity?: string;
+    file?: string;
+    problem?: string;
+    reason?: string;
+    recommendedFix?: string;
+  }>;
+}): Promise<{
+  generatedFileCount: number;
+  response: string;
+  executionId?: string;
+}> {
+  const project = await prisma.project.findFirst({
+    where: {
+      id: input.projectId,
+      ownerId: input.userId,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!project) {
+    throw new Error(
+      "Project not found or you do not have access to it."
+    );
+  }
+
+  const developer = await prisma.agent.findFirst({
+    where: {
+      type: "DEVELOPER",
+      isActive: true,
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!developer) {
+    throw new Error("Developer agent is not available.");
+  }
+
+  const normalizePath = (value: string) =>
+    value
+      .trim()
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/")
+      .replace(/^\.\/+/, "");
+
+  const safeIssues = input.issues
+    .filter(
+      (issue) =>
+        typeof issue?.file === "string" &&
+        typeof issue?.problem === "string"
+    )
+    .slice(0, 10)
+    .map((issue) => ({
+      severity: issue.severity || "MEDIUM",
+      file: normalizePath(issue.file!),
+      problem: issue.problem!.trim(),
+      reason: issue.reason || "No reason provided.",
+      recommendedFix:
+        issue.recommendedFix ||
+        "Correct the implementation while preserving the existing architecture.",
+    }))
+    .filter((issue) => issue.file && issue.problem);
+
+  if (safeIssues.length === 0) {
+    throw new Error(
+      "No actionable validation issues were provided for repair."
+    );
+  }
+
+  const issuesByFile = new Map<
+    string,
+    {
+      severity: string;
+      file: string;
+      problem: string;
+      reason: string;
+      recommendedFix: string;
+    }[]
+  >();
+
+  for (const issue of safeIssues) {
+    const list = issuesByFile.get(issue.file) || [];
+    list.push(issue);
+    issuesByFile.set(issue.file, list);
+  }
+
+  const issuePaths = Array.from(issuesByFile.keys());
+
+  const loadFileContext = async (paths: string[]) => {
+    const allFiles = await prisma.projectFile.findMany({
+      where: {
+        projectId: project.id,
+        type: "FILE",
+      },
+      orderBy: {
+        path: "asc",
+      },
+      select: {
+        path: true,
+        content: true,
+      },
+    });
+
+    const requested = new Set(paths.map(normalizePath));
+
+    const relatedFiles = allFiles.filter((file) => {
+      const normalized = normalizePath(file.path);
+
+      if (requested.has(normalized)) {
+        return true;
+      }
+
+      const lower = normalized.toLowerCase();
+
+      return (
+        lower.includes("prisma") ||
+        lower.includes("student") ||
+        lower.endsWith("package.json") ||
+        lower.endsWith("tsconfig.json")
+      );
+    });
+
+    return relatedFiles
+      .slice(0, 24)
+      .map(
+        (file) => `
+FILE: ${file.path}
+====================
+${(file.content || "").slice(0, 16000)}
+====================
+`
+      )
+      .join("\n");
+  };
+
+  const buildIssueContext = (paths: string[]) =>
+    paths
+      .flatMap((path) => issuesByFile.get(path) || [])
+      .map(
+        (issue, index) => `
+ISSUE ${index + 1}
+-----------
+Severity: ${issue.severity}
+File: ${issue.file}
+Problem: ${issue.problem}
+Reason: ${issue.reason}
+Recommended Fix: ${issue.recommendedFix}
+`
+      )
+      .join("\n");
+
+  const runRepairPass = async (paths: string[]) => {
+    const fileContext = await loadFileContext(paths);
+
+    const repairPrompt = `
+Repair the generated project using the Testing Agent findings below.
+
+PROJECT
+=======
+${project.name}
+
+TARGET FILES THAT MUST BE REPAIRED
+==================================
+${paths.map((path) => `- ${path}`).join("\n")}
+
+TESTING FINDINGS
+================
+${buildIssueContext(paths)}
+
+CURRENT PROJECT FILES / RELATED CONTEXT
+=======================================
+${fileContext}
+
+REPAIR REQUIREMENTS
+===================
+1. Fix EVERY finding for EVERY target file listed above.
+2. You MUST return a corrected version of EVERY target file listed above.
+3. If multiple issues belong to one file, fix all of them in the same returned file.
+4. Return the COMPLETE file content, not a patch or partial snippet.
+5. The returned path MUST exactly match the target path.
+6. Do not rename, relocate, duplicate, or invent files.
+7. Do not return files that are not in the target-file list.
+8. Preserve the existing DevPilot architecture and technology stack.
+9. Keep imports, APIs, Prisma usage, routes, and shared types consistent.
+10. Do not create a second PrismaClient when a shared Prisma instance exists.
+11. Do not create a duplicate implementation when an existing service/component already provides the required behavior.
+12. Do not use pseudo-code or TODO placeholders.
+13. Make the smallest production-quality changes needed to resolve the findings.
+14. Return valid JSON only in this exact format:
+
+{
+  "files": [
+    {
+      "path": "exact/target/path.ts",
+      "content": "complete corrected file content"
+    }
+  ]
+}
+
+15. The "files" array MUST contain exactly one object for each target file.
+16. Do not wrap the JSON in markdown fences.
+17. Do not include explanations outside the JSON.
+`;
+
+    console.log(
+      `AI repair pass | project=${project.name} | targetFiles=${paths.join(", ")}`
+    );
+
+    return executeAgent({
+      agentId: developer.id,
+      prompt: repairPrompt,
+      userId: input.userId,
+      projectId: project.id,
+      allowedFilePaths: paths,
+    });
+  };
+
+  const repairedPaths = new Set<string>();
+  const responses: string[] = [];
+  let latestExecutionId: string | undefined;
+
+  const firstResult = await runRepairPass(issuePaths);
+  responses.push(firstResult.response);
+  latestExecutionId = firstResult.executionId;
+
+  for (const path of firstResult.generatedFilePaths || []) {
+    repairedPaths.add(normalizePath(path));
+  }
+
+  const missingPaths = issuePaths.filter(
+    (path) => !repairedPaths.has(normalizePath(path))
+  );
+
+  if (missingPaths.length > 0) {
+    console.warn(
+      `AI repair pass incomplete | missingFiles=${missingPaths.join(", ")}`
+    );
+
+    const secondResult = await runRepairPass(missingPaths);
+    responses.push(secondResult.response);
+    latestExecutionId = secondResult.executionId || latestExecutionId;
+
+    for (const path of secondResult.generatedFilePaths || []) {
+      repairedPaths.add(normalizePath(path));
+    }
+  }
+
+  if (repairedPaths.size === 0) {
+    throw new Error(
+      "Developer Repair Agent completed but did not generate any corrected files."
+    );
+  }
+
+  const missingAfterRetry = issuePaths.filter(
+    (path) => !repairedPaths.has(normalizePath(path))
+  );
+
+  if (missingAfterRetry.length > 0) {
+    console.warn(
+      `AI repair completed partially | unresolved target files=${missingAfterRetry.join(", ")}`
+    );
+  }
+
+  console.log(
+    `Repair workflow completed | project=${project.name} | files=${repairedPaths.size}`
+  );
+
+  return {
+    generatedFileCount: repairedPaths.size,
+    response: responses.join("\n\n"),
+    executionId: latestExecutionId,
+  };
 }
 /*
 |--------------------------------------------------------------------------
@@ -738,7 +1290,8 @@ export async function executeAgent(
   const projectContext =
     await getProjectContext(
       input.projectId,
-      input.userId
+      input.userId,
+      agent.type
     );
 
   /*
@@ -758,6 +1311,36 @@ technical guidance.
 
 Focus specifically on the responsibilities
 of your assigned role.`;
+
+const debuggerInstruction =
+  agent.type === "DEBUGGER" && input.projectId
+    ? `
+DEBUGGER PROJECT-ANALYSIS MODE
+=============================
+
+You are debugging the ACTUAL selected project. The project files included
+in the context above are the source of truth.
+
+Rules:
+- Inspect the supplied file contents before making any diagnosis.
+- Report only issues supported by the actual code.
+- Do not use generic "typical project" problems as findings.
+- For every issue, identify the exact file path.
+- Explain the concrete code pattern causing the issue.
+- Distinguish confirmed issues from risks or missing evidence.
+- If no issue is confirmed from the supplied files, say so explicitly.
+- Prefer fixes that preserve the existing DevPilot architecture.
+- Do not claim that a file was changed; this mode is analysis only.
+
+When useful, structure findings as:
+1. File
+2. Severity
+3. Problem
+4. Evidence from the file
+5. Root cause
+6. Recommended fix
+`
+    : "";
 
 const developerFileInstruction =
   agent.type === "DEVELOPER" && input.projectId
@@ -801,6 +1384,10 @@ agent inside the DevPilot AI platform.
 Your assigned agent type:
 
 ${agent.type}
+
+${developerFileInstruction}
+
+${debuggerInstruction}
 
 YOUR ROLE
 ========
@@ -1008,18 +1595,22 @@ ${prompt}
     response?.output_text?.trim() ||
     "The AI agent did not return a response.";
 
-    let generatedFileCount = 0;
+  let generatedFileCount = 0;
+  let generatedFilePaths: string[] = [];
 
-if (
-  agent.type === "DEVELOPER" &&
-  input.projectId
-) {
-  generatedFileCount =
-    await saveDeveloperFiles(
+  if (
+    agent.type === "DEVELOPER" &&
+    input.projectId
+  ) {
+    const savedFiles = await saveDeveloperFiles(
       text,
-      input.projectId
+      input.projectId,
+      input.allowedFilePaths
     );
-}
+
+    generatedFileCount = savedFiles.count;
+    generatedFilePaths = savedFiles.paths;
+  }
 
   const durationMs =
     Date.now() - startTime;
@@ -1119,6 +1710,10 @@ if (
     model: usedModel,
 
     durationMs,
+
+    generatedFileCount,
+
+    generatedFilePaths,
 
     executionId,
   };
