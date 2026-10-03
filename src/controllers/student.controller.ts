@@ -1,9 +1,6 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../../backend/src/config/prisma';
 
-const prisma = new PrismaClient();
-
-// Get all students
 export const getStudents = async (req: Request, res: Response) => {
   try {
     const students = await prisma.student.findMany({
@@ -15,10 +12,9 @@ export const getStudents = async (req: Request, res: Response) => {
   }
 };
 
-// Register student
 export const createStudent = async (req: Request, res: Response) => {
   try {
-    const { name, email, age, course } = req.body;
+    const { enrollmentId, firstName, lastName, email, department, status } = req.body;
     
     const existing = await prisma.student.findUnique({ where: { email } });
     if (existing) {
@@ -26,7 +22,7 @@ export const createStudent = async (req: Request, res: Response) => {
     }
 
     const student = await prisma.student.create({
-      data: { name, email, age: Number(age), course },
+      data: { enrollmentId, firstName, lastName, email, department, status: status || 'ACTIVE' },
     });
 
     return res.status(201).json({ success: true, data: student });
@@ -35,15 +31,14 @@ export const createStudent = async (req: Request, res: Response) => {
   }
 };
 
-// Update student
 export const updateStudent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, email, age, course } = req.body;
+    const { firstName, lastName, email, department, status } = req.body;
 
     const student = await prisma.student.update({
       where: { id },
-      data: { name, email, age: age ? Number(age) : undefined, course },
+      data: { firstName, lastName, email, department, status },
     });
 
     return res.status(200).json({ success: true, data: student });
@@ -52,7 +47,6 @@ export const updateStudent = async (req: Request, res: Response) => {
   }
 };
 
-// Delete student
 export const deleteStudent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
